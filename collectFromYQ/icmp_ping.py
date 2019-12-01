@@ -66,7 +66,7 @@ def recv_one_ping(rawsocket,icmp_id, icmp_sq ,time_sent,timeout):
         if type == 0 and packet_id == icmp_id and sequence == icmp_sq:
             return time_received - time_sent
         timeout = timeout - how_long_in_select
-        if timeout <= 0:
+        if timeout < 0:
             return -1
 
 def one_ping(dst_addr,icmp_sq,timeout = 2):
@@ -74,25 +74,24 @@ def one_ping(dst_addr,icmp_sq,timeout = 2):
         rawsocket = socket.socket(socket.AF_INET, socket.SOCK_RAW, socket.getprotobyname("icmp"))
     except socket.error as e:
         if e.errno == 1:
-            msg = e.message + (" please run as root ")
+            msg = e.args + (" please run as root ")
             raise socket.error(msg)
         raise
 
     icmp_id = os.getpid() & 0xFFFF
 
-    send_time,addr = send_one_ping(rawsocket, dst_addr, icmp_id, icmp_sq)
+    send_time, addr = send_one_ping(rawsocket, dst_addr, icmp_id, icmp_sq)
     time = recv_one_ping(rawsocket, icmp_id, icmp_sq, send_time, timeout)
-    return time,addr
+    return time, addr
 
 
 
 def ping(dst_addr,timeout = 2, count = 4):
-    for i in range(0,count):
-        time, addr = one_ping(dst_addr,i+1,timeout)
-        if time > 0:
-            print("来自 {0} 的回复: 字节=32 时间={1}ms".format(addr,int(time*1000)))
-        else:
-            print("来自 {0} 的回复:超时".format(addr))
+    for i in range(0, count):
+        time, addr = one_ping(dst_addr, i+1, timeout)
+        if time >= 0:
+            return 0            # 正常返回0
+    return 1            # 异常返回1
 
 
 
@@ -102,6 +101,9 @@ if __name__=="__main__":
     print("1111111111")
     '''if len(sys.argv) < 2:
         sys.exit('Usage: ping.py <hostname>')
-    ping(sys.argv[1])'''
-    for i in range(1,40):
-        ping('10.35.185.%d'%i, count=1, timeout=1)
+    ping(sys.argv[1])
+    for i in range(1,255):
+        ping('10.35.185.%d'%i, count=1, timeout=2)
+        '''
+    d = ping('10.35.185.99', count=4, timeout=2)
+    print(d)
