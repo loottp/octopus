@@ -9,6 +9,7 @@ import collectNetInfo
 import collectYqInfo
 from icmp_ping import *
 import sqlite3
+from collectYqInfo import DataCollection
 
 dbOracle = Database()
 dbOracle.ConnectDatabase()
@@ -16,6 +17,8 @@ sqlSelectYQ = '''select  a.instrip, a.instrid ,a.stationid, a.pointid ,a.usernam
         b.stationname,  c.instrname, c.instrtype from qz_dict_stationinstruments a, qz_dict_stations b, 
         qz_dict_instruments c where a.stationid=b.stationid and a.instrcode=c.instrcode  
         and enddate is null and a.instrip !='127.0.0.1' '''
+
+# yqInfos的顺序：ip|id|username|password|instrProject|stationname|instrname|instrtype
 yqInfos = list(dbOracle.SelectData(sqlSelectYQ))
 results = {}                #为最终结果
 for i in yqInfos:
@@ -24,11 +27,15 @@ for i in yqInfos:
     results[i[1]] = i
 dbOracle.DBclose()
 
+"""
+检测仪器能力的类，比如网络、数采状态、实时数据、当天数据、时钟、当前值从网页、时钟从网页
+"""
 class capacity:
     def __init__(self, yqInfos):
         self.conn = sqlite3.connect('yq.db')
         self.c = self.conn.cursor()
-        self.yqInfos = yqInfos
+        self.yqInfos = yqInfos      #仪器信息列表
+
 
     def dbclose(self):
         self.conn.close()
@@ -57,7 +64,26 @@ class capacity:
             v.append((results[i[1]][10], i[1]))     # results[i][10]为最终的更新network值。
         self.c.executemany('update capacity set network=? where instrid=?', v)
 
+    def updateCollection(self):
+        s = socket.socket()
+        s.settimeout(30)
 
+        for i in self.yqInfos:
+            try:
+                s.connect((i[0],81))
+            except TimeoutError:
+
+
+            DC = DataCollection(i[0], i[1], i[2], i[3])
+            DC.Connect()
+            t = DC.Status()
+            if t == None:
+
+    def updateRealData(self):
+        pass
+
+    def updateTodayData(self):
+        pass
 
 
 

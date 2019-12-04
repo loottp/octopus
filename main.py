@@ -4,7 +4,7 @@ select  instrid,instrip ,stationid, pointid from qz_dict_stationinstruments
 入口主函数
 '''
 from datacollection import *
-import database
+from DB import database
 import time
 import icmp
 import databaseTables
