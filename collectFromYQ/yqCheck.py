@@ -28,13 +28,20 @@ for i in yqInfos:
 dbOracle.DBclose()
 
 """
-检测仪器能力的类，比如网络、数采状态、实时数据、当天数据、时钟、当前值从网页、时钟从网页
+检测仪器能力的类，比如网络、登陆、数采状态、实时数据、当天数据、时钟、当前值从网页、时钟从网页
+数据库capacity：0代表正常，1代表异常， 2代表状态未定
 """
-class capacity:
-    def __init__(self, yqInfos):
+class check:
+    def __init__(self, ip, id, username, password):
         self.conn = sqlite3.connect('yq.db')
         self.c = self.conn.cursor()
-        self.yqInfos = yqInfos      #仪器信息列表
+        self.ip = ip      #仪器信息列表
+        self.id = id
+        self.username = username
+        self.password = password
+        self.network = None
+        self.collection = None
+        self.s = socket.socket()
 
 
     def dbclose(self):
@@ -43,6 +50,21 @@ class capacity:
     def insertToSql3(self):
         self.c.executemany('insert into capacity values (?,?,?,?,?,?,?,?,?,?,null,null,null,null,null,null,null) ', self.yqInfos)
         self.conn.commit()
+
+    def check(self):
+        # 检查网络
+        d = ping(self.ip, timeout=2, count=1)
+        if d == 1:
+            d = ping(i[0].strip(), timeout=2, count=4)
+            return [1, 2, 2, 2, 2, 2, 2, 2]
+
+        # 检查登陆
+        try:
+            self.s.connect((self.ip, 81))
+        except TimeoutError:
+            print(self.ip, " ", self.id, '无法连接ping不通')
+
+
 
 
     def updateNetwork(self):
@@ -65,19 +87,7 @@ class capacity:
         self.c.executemany('update capacity set network=? where instrid=?', v)
 
     def updateCollection(self):
-        s = socket.socket()
-        s.settimeout(30)
-
-        for i in self.yqInfos:
-            try:
-                s.connect((i[0],81))
-            except TimeoutError:
-
-
-            DC = DataCollection(i[0], i[1], i[2], i[3])
-            DC.Connect()
-            t = DC.Status()
-            if t == None:
+        pass
 
     def updateRealData(self):
         pass

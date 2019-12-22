@@ -38,24 +38,40 @@ class DataCollection:
         self.id = id
         self.user = user
         self.password = password
-        self.conInstrument = socket.socket()  # 套接字对象，通过socket
+        self.conInstrument = socket.socket(socket.AF_INET, socket.SOCK_STREAM)  # 套接字对象，通过socket
         self.conInstrument.settimeout(30)
+        self.conStatus = 1      #连接状态码1为连接正常 , 2为登陆正常，3为连接不上， 4为连接不正常nak，5为收到错误指令err
+        self.recvStatus = 1     #接收数据状态码1为正常，2为无此项功能nak，3为错误代码err 4超时
+        self.sendStatus = 1     #发送数据状态码1为正常，2为超时异常， 3为其他。
+        self.dataFormatStatus = 1 #数据格式状态码1为正常，2为异常
 
     def recv_end(self, length):
-        '尾标识方法，备用'
-        End = b"\nack\n"
-        total_data = []
-        data = b''
+        '尾标识方法，接收数据'
+        total_data = b''
         while True:
-            data = self.conInstrument.recv(length)
-            if End in data:
-                total_data.append(data)
-                break
-            total_data.append(data)
-            if len(total_data) > 1:
-                if End in total_data:
+            try:
+                data = self.conInstrument.recv(length)
+                if data == b'$nak\n':
+                    self.recvStatus = 2
                     break
-        return b''.join(total_data).decode()
+                elif data == b'$err\n':
+                    self.recvStatus = 3
+                    break
+                else:
+                    total_data += data
+                    if len(total_data) > 1:
+                        if b'ack\n' in total_data:
+                            self.recvStatus = 1
+                            break
+                        if b'$nak\n' in data:
+                            self.recvStatus = 2
+                            break
+                        if b'$err\n' in data:
+                            self.recvStatus = 3
+                            break
+            except socket.timeout:
+                self.recvStatus = 4
+        return total_data.decode()
 
     def tuoke(self, length):
         tem = []
@@ -85,43 +101,64 @@ class DataCollection:
         # self.conInstrument = socket.socket()
         try:
             self.conInstrument.connect((self.ip, 81))
-        except TimeoutError:
+        except socket.timeout:
             print(self.ip, " ", self.id, '无法连接ping不通')
+            self.conStatus = 3      #连接不上
         else:
+            self.conStatus = 1
             order = "get /42+{0}+lin+{1}+{2} /http/1.1".format(self.id, self.user, self.password)
             self.conInstrument.sendall(bytes(order, encoding="utf-8"))
-            tem = self.conInstrument.recv(100)
-            if tem == b'$err\n':
-                print("仪器无法连上", self.ip, self.id)
+            tem = self.conInstrument.recv(10)
+            if tem == b'$ack\n':
+                self.conStatus = 2
+            elif tem == b'$nak\n':
+                self.conStatus = 4
+            elif tem == b'$err\n':
+                self.conStatus = 5
+            else:
+                print('未知错误', tem)
 
-            return tem
+    #判断接收的数据是否正常
+    def check(self, data):
+        try:
+            data = data.split('\n')[1]
+            length = int(data.split(' ')[0])
+            if length == len(data):
+                return 1            #1为正常
+            else:
+                return 0            #0为出错误
+        except:
+            self.dataFormatStatus = 2
+            return 0
 
-    # 采集状态信息
+    # 采集状态信息, 36 20191222214137 2 0 0 0 0 0 0 0 00 取1,2,4,5,8,9
     def Status(self):
         '采集状态仪器状态信息，通过get /19+id+ste /http/1.1'
         order = "get /19+{0}+ste /http/1.1".format(self.id)
         try:
             self.conInstrument.sendall(bytes(order, encoding="utf-8"))
         except socket.timeout:
-            print(self.ip, " ", self.id, "发送数据超时")
+            self.sendStatus = 2
+        except:
+            self.sendStatus = 2
         else:
-            tem = self.tuoke(100)
-            if tem == None:
+            self.sendStatus = 1
+            tem = self.recv_end(100)
+            if tem == '':
                 return None
             else:
-
-                tem = tem.replace('  ', ' ').split(" ")
-                # print(tem)
-                # 删除列表中序号为2,5,6,9以及10（如果有），从尾巴开始删除元素
                 try:
-                    del tem[10]
+                    if self.check(tem):
+                        tem = tem.split('\n')[1].replace('  ', ' ').split(' ')
+                        tem = tem[1:10]
+                        self.dataFormatStatus = 1
+                        return tem
+                    else:
+                        self.dataFormatStatus = 2
+                        print('数据出现异常')
                 except:
-                    pass
-                del tem[9]
-                del tem[5:7]  # 5,6但不包括7
-                del tem[2]
-                print(tem)
-                return tem
+                    self.dataFormatStatus = 2
+                    print('数据格式不对')
 
     # 实时采集数据
     # {(stationid,pointid):{instrip:ip, instrid:id, stationname:台站名, instrname:仪器名, instrtype:仪器型号}
@@ -266,3 +303,28 @@ def ToImageBin(y, unit):
     buffer.close()
     plt.close(fig)
     return data
+
+if __name__ == "__main__":
+    print("开始")
+    #dc = DataCollection("10.35.185.100", "9100DQYL0308", "administrator", "01234567")
+    #dc = DataCollection("10.35.180.253", "X212MGPH0144", "administrator", "01234567")
+    #dc = DataCollection("10.35.179.130", "X212MGPH0147", "administrator", "01234567")
+    #dc = DataCollection("10.35.185.111", "J222DQYQ9548", "administrator", "01234567")
+    #dc = DataCollection("10.35.185.112", "X212MGPH0143", "administrator", "01234567")
+    #dc = DataCollection("10.35.177.125", "X222WHYQ3056", "admin", "xm361003")
+    dc = DataCollection("10.35.186.103", "X312JSEA1803", "administrator", "01234567")
+    dc.Connect()
+    #todaydata = dc.TodayDataColl()
+    status = dc.Status()
+    #curData = dc.FiveMinuteData()
+    #print(status,curData)
+    #data1 = dc.MeasurementParameter()
+    #print(data1)
+    #p = Process(target=dc.RealTimeData, args=())
+    #p.start()
+    #dc.TodayData()
+    #p.join()
+    #dc.FiveMinuteData()
+    #print(status, curData, data1)
+    print(dc.conStatus, dc.sendStatus, dc.recvStatus, dc.dataFormatStatus)
+    print("结束")
