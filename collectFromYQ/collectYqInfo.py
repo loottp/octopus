@@ -102,8 +102,12 @@ class DataCollection:
         try:
             self.conInstrument.connect((self.ip, 81))
         except socket.timeout:
-            print(self.ip, " ", self.id, '无法连接ping不通')
             self.conStatus = 3      #连接不上
+        except TimeoutError:
+            self.conStatus = 3  # 连接不上
+            print('无法连接', self.ip)
+            print(self.conStatus, self.sendStatus, self.recvStatus, self.dataFormatStatus)
+            print('\n')
         else:
             self.conStatus = 1
             order = "get /42+{0}+lin+{1}+{2} /http/1.1".format(self.id, self.user, self.password)
@@ -118,16 +122,26 @@ class DataCollection:
             else:
                 print('未知错误', tem)
 
+    def out(self, data):
+        print(self.ip, self.id)
+        print(data)
+        print(self.conStatus, self.sendStatus, self.recvStatus, self.dataFormatStatus)
+        print("--------------------------------")
+        print('\n')
+
     #判断接收的数据是否正常
-    def check(self, data):
+    def check(self, oneData):
         try:
-            data = data.split('\n')[1]
+            data = oneData.split('\n')[1]
             length = int(data.split(' ')[0])
-            if length == len(data):
+            if length == len(data) or length < len(data):
                 return 1            #1为正常
+            elif length - len(data) == 8:   #重力仪特有缺少8个字符
+                return 2
             else:
-                return 0            #0为出错误
+                return 3            #0为出错误
         except:
+            print(oneData)
             self.dataFormatStatus = 2
             return 0
 
@@ -137,7 +151,10 @@ class DataCollection:
         order = "get /19+{0}+ste /http/1.1".format(self.id)
         try:
             self.conInstrument.sendall(bytes(order, encoding="utf-8"))
+            curTime = round(time.time())
         except socket.timeout:
+            self.sendStatus = 2
+        except TimeoutError:
             self.sendStatus = 2
         except:
             self.sendStatus = 2
@@ -148,17 +165,31 @@ class DataCollection:
                 return None
             else:
                 try:
-                    if self.check(tem):
-                        tem = tem.split('\n')[1].replace('  ', ' ').split(' ')
-                        tem = tem[1:10]
+                    if self.check(tem) == 1 :
+                        data = tem.split('\n')[1].replace('  ', ' ').split(' ')
+                        data = data[1:10]
+                        data.append(curTime)
+                        diff = round(time.mktime(time.strptime(data[0], "%Y%m%d%H%M%S")))-curTime
+                        data.append(diff)
                         self.dataFormatStatus = 1
-                        return tem
-                    else:
+                        return data
+                    elif self.check(tem) == 2:      #重力仪出现缺少字符
+                        data = tem.split('\n')[1].strip().replace('  ', ' ').split(' ')
+                        data = data[1:]
+                        data.extend(['NULL', 'NULL', 'NULL'])
+                        data.append(curTime)
+                        diff = round(time.mktime(time.strptime(data[0], "%Y%m%d%H%M%S"))) - curTime
+                        data.append(diff)
+                        self.dataFormatStatus = 1
+                        return data
+                    elif self.check(tem) == 3:
                         self.dataFormatStatus = 2
-                        print('数据出现异常')
+                        print('数据出现异常', tem)
+                        return None
                 except:
                     self.dataFormatStatus = 2
                     print('数据格式不对')
+                    return None
 
     # 实时采集数据
     # {(stationid,pointid):{instrip:ip, instrid:id, stationname:台站名, instrname:仪器名, instrtype:仪器型号}
@@ -209,6 +240,10 @@ class DataCollection:
         self.conInstrument.sendall(bytes(order, encoding="utf-8"))
         tem = self.conInstrument.recv(200)
         print(tem)
+
+    #关闭套接字
+    def Close(self):
+        self.conInstrument.close()
 
     # 采集当天数据
     def TodayData(self):
@@ -304,27 +339,59 @@ def ToImageBin(y, unit):
     plt.close(fig)
     return data
 
+def shiyunxing():
+    print('开始')
+    import sqlite3
+    conn = sqlite3.connect('yq.db')
+    c = conn.cursor()
+    sql = 'select instrip, instrid, username, password from capacity'
+    c.execute(sql)
+    while True:
+        para = c.fetchone()
+        if para is None:
+            break
+        print("--------------------------------")
+        dc = DataCollection(*para)
+        dc.Connect()
+        if dc.conStatus == 2:
+            status = dc.Status()
+            dc.out(status)
+            dc.Close()
+
+def shiyunxingOne():
+    print("--------------------------------")
+    dc = DataCollection('10.35.183.103', 'X312JSEA0810', 'administrator', '01234567')
+    dc.Connect()
+    if dc.conStatus == 2:
+        status = dc.Status()
+        dc.out(status)
+        dc.Close()
+
 if __name__ == "__main__":
     print("开始")
+    shiyunxingOne()
     #dc = DataCollection("10.35.185.100", "9100DQYL0308", "administrator", "01234567")
     #dc = DataCollection("10.35.180.253", "X212MGPH0144", "administrator", "01234567")
     #dc = DataCollection("10.35.179.130", "X212MGPH0147", "administrator", "01234567")
     #dc = DataCollection("10.35.185.111", "J222DQYQ9548", "administrator", "01234567")
     #dc = DataCollection("10.35.185.112", "X212MGPH0143", "administrator", "01234567")
     #dc = DataCollection("10.35.177.125", "X222WHYQ3056", "admin", "xm361003")
-    dc = DataCollection("10.35.186.103", "X312JSEA1803", "administrator", "01234567")
-    dc.Connect()
-    #todaydata = dc.TodayDataColl()
-    status = dc.Status()
-    #curData = dc.FiveMinuteData()
-    #print(status,curData)
-    #data1 = dc.MeasurementParameter()
-    #print(data1)
-    #p = Process(target=dc.RealTimeData, args=())
-    #p.start()
-    #dc.TodayData()
-    #p.join()
-    #dc.FiveMinuteData()
-    #print(status, curData, data1)
-    print(dc.conStatus, dc.sendStatus, dc.recvStatus, dc.dataFormatStatus)
+    #dc = DataCollection("10.35.186.103", "X312JSEA1803", "administrator", "01234567")
+    #dc = DataCollection("10.35.184.101", "X312JSEA1005", "administrator", "01234567")
+    #dc = DataCollection("10.35.178.20", "X212MGPH0092", "administrator", "01234567")
+    #dc.Connect()
+    #if dc.conStatus == 2:
+        #todaydata = dc.TodayDataColl()
+        #status = dc.Status()
+        #curData = dc.FiveMinuteData()
+        #print(status,curData)
+        #data1 = dc.MeasurementParameter()
+        #print(data1)
+        #p = Process(target=dc.RealTimeData, args=())
+        #p.start()
+        #dc.TodayData()
+        #p.join()
+        #dc.FiveMinuteData()
+        #print(status, curData, data1)
+    #print(dc.conStatus, dc.sendStatus, dc.recvStatus, dc.dataFormatStatus)
     print("结束")
