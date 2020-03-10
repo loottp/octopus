@@ -103,6 +103,7 @@ class DataCollection:
             self.conInstrument.connect((self.ip, 81))
         except socket.timeout:
             self.conStatus = 3      #连接不上
+            print(self.conStatus, self.sendStatus, self.recvStatus, self.dataFormatStatus)
         except TimeoutError:
             self.conStatus = 3  # 连接不上
             print('无法连接', self.ip)
@@ -121,6 +122,7 @@ class DataCollection:
                 self.conStatus = 5
             else:
                 print('未知错误', tem)
+            print("连接状态：", self.conStatus)
 
     def out(self, data):
         print(self.ip, self.id)
@@ -134,7 +136,8 @@ class DataCollection:
         try:
             data = oneData.split('\n')[1]
             length = int(data.split(' ')[0])
-            if length == len(data) or length < len(data):
+            shijiLength = len(data)
+            if length == shijiLength or length < shijiLength or length - shijiLength == 1 :
                 return 1            #1为正常
             elif length - len(data) == 8:   #重力仪特有缺少8个字符
                 return 2
@@ -217,13 +220,32 @@ class DataCollection:
 
     # 采集5分钟数据
     def FiveMinuteData(self):
+        '采集状态仪器状态信息，通过get /19+id+ste /http/1.1'
         order = "get /21+{0}+dat+5 /http/1.1".format(self.id)
-        self.conInstrument.sendall(bytes(order, encoding="utf-8"))
-        # tem = self.conInstrument.recv(200)
-        tem = self.tuoke(200)
-        if tem == None:
-            return None
+        try:
+            self.conInstrument.sendall(bytes(order, encoding="utf-8"))
+            curTime = round(time.time())
+        except socket.timeout:
+            self.sendStatus = 2
+        except TimeoutError:
+            self.sendStatus = 2
+        except:
+            self.sendStatus = 2
         else:
+            self.sendStatus = 1
+            tem = self.recv_end(200)
+            if tem == '':
+                return None
+            else:
+                try:
+                    if self.check(tem) == 1:
+                        data = tem.split('\n')[1].replace('  ', ' ').split(' ')
+                        data.append(curTime)
+                        self.dataFormatStatus = 1
+                        return data
+                except:
+                    print(data)
+                '''
             tem = tem.replace('  ', ' ').split(" ")  # 有的字符串中有两个空格，replace去除两个空格
             itemLength = int(tem[4])
             result = tem[-itemLength:]
@@ -232,7 +254,7 @@ class DataCollection:
                 return result[0]
             else:
                 result = ' '.join(result)
-                return result
+                return result'''
 
     # 终止实时数据
     def StopData(self):
@@ -354,16 +376,16 @@ def shiyunxing():
         dc = DataCollection(*para)
         dc.Connect()
         if dc.conStatus == 2:
-            status = dc.Status()
+            status = dc.FiveMinuteData()
             dc.out(status)
             dc.Close()
 
 def shiyunxingOne():
     print("--------------------------------")
-    dc = DataCollection('10.35.183.103', 'X312JSEA0810', 'administrator', '01234567')
+    dc = DataCollection('10.35.73.164', '431320060939', 'administrator', '01234567')
     dc.Connect()
     if dc.conStatus == 2:
-        status = dc.Status()
+        status = dc.FiveMinuteData()
         dc.out(status)
         dc.Close()
 
