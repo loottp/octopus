@@ -48,7 +48,7 @@ class check:
 
     def checkYQ(self):
         # 检查网络
-        yqinfo = list(self.c.execute("SELECT INSTRIP,INSTRID,USERNAME,PASSWORD FROM CAPACITY"))
+        yqinfo = list(self.c.execute("SELECT INSTRIP,INSTRID,USERNAME,PASSWORD,INSTRPROJECT FROM CAPACITY WHERE INSTRPROJECT=0"))
         for i in yqinfo:
             s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
             d = ping(i[0].strip(), timeout=2, count=2)
@@ -64,6 +64,7 @@ class check:
                     self.c.execute("UPDATE CAPACITY SET CONNECTION=1 WHERE INSTRID='%s'" % i[1])
                     self.conn.commit()
                 else:
+
                     # 测试登录
                     order = "get /42+{0}+lin+{1}+{2} /http/1.1".format(i[1], i[2], i[3])
                     s.sendall(bytes(order, encoding="utf-8"))
@@ -78,13 +79,14 @@ class check:
                         except:
                             print(i[0], '收集仪器状态出现异常')
                         else:
-                            tem = s.recv(100)
-                            if b'ack\n' in tem:
+                            tem_status = s.recv(100)
+                            print(tem_status)
+                            if b'ack\n' in tem_status:
                                 o_yqstatus = 0
                             else:
                                 o_yqstatus = 1
-
                         
+
                         # 测试实时数据
                         order = "get /21+{0}+dat+0 /http/1.1".format(i[1])
                         try:
@@ -92,36 +94,69 @@ class check:
                         except:
                             print(i[0], '实时数据出现异常')
                         else:
-                            temp = s.recv(300)
-                            if b'ack\n' in tem:
-                                o_todaydata = 0
+                            tem_real = s.recv(300)
+                            print(tem_real)
+                            if b'ack\n' in tem_real:
+                                o_realdata = 0
+                                self.c.execute("UPDATE CAPACITY SET REALDATA=0 WHERE INSTRID='%s'" % i[1])
+                                self.conn.commit()
                             else:
-                                o_todaydata = 1
+                                o_realdata = 1
+                                self.c.execute("UPDATE CAPACITY SET REALDATA=1 WHERE INSTRID='%s'" % i[1])
+                                self.conn.commit()
+
                             # 停止实时数据
                             order = "get /19+{0}+stp /http/1.1".format(i[1])
                             s.sendall(bytes(order, encoding="utf-8"))
-                            tem = s.recv(100)
-                        """
+                            tem_stop = s.recv(100)
+                        
 
-                        #测试当天数据
-                        order = "get /23+{0}+dat+1+0 /http/1.1".format(i[1])
-                        try:
-                            s.sendall(bytes(order, encoding="utf-8"))
-                        except:
-                            print(i[0], '当天数据出现异常')
+
+                        #不包括九五仪器
+                        if i[4]==1:
+                            #测试当天数据
+                            order = "get /23+{0}+dat+1+0 /http/1.1".format(i[1])
+                            try:
+                                s.sendall(bytes(order, encoding="utf-8"))
+                            except:
+                                print(i[0], '当天数据出现异常')
+                            else:
+                                tem_todaydata = []
+                                while True:
+                                    data = s.recv(50000)
+
+                                    if not data: break
+                                    tem_todaydata.append(data)
+
+                                    tem1 = b''.join(tem_todaydata)
+                                    print(tem1)
+                                    if b'ack\n' in tem1:
+                                        self.c.execute("UPDATE CAPACITY SET TODAYDATA=0 WHERE INSTRID='%s'" % i[1])
+                                        self.conn.commit()
+                                        break
+                                    if b'$err' in tem1:
+                                        self.c.execute("UPDATE CAPACITY SET TODAYDATA=1 WHERE INSTRID='%s'" % i[1])
+                                        self.conn.commit()
+                                        break
+                                        
+                            #测试五分钟数据
+                            order = "get /21+{0}+dat+5 /http/1.1".format(i[1])
+                            try:
+                                s.sendall(bytes(order, encoding="utf-8"))
+                            except:
+                                print(i[0], '五分钟数据出现异常')
+                            else:
+                                tem_fivedata = s.recv(500)
+                                print(tem_fivedata)
+                                if b'ack\n' in tem_fivedata:
+                                    self.c.execute("UPDATE CAPACITY SET FIVEDATA=0 WHERE INSTRID='%s'" % i[1])
+                                    self.conn.commit()
+                                else:
+                                    self.c.execute("UPDATE CAPACITY SET FIVEDATA=1 WHERE INSTRID='%s'" % i[1])
+                                    self.conn.commit()
                         else:
-                            tem = []
-                            while True:
-                                data = s.recv(1000)
-                                if not data: return None
-                                tem.append(data)
-                                tem1 = b''.join(tem)
-                                if b'ack\n' in tem1:
-                                    self.c.execute("UPDATE CAPACITY SET TODAYDATA=0 WHERE INSTRID='%s'" % i[1])
-                                    self.conn.commit()
-                                if b'$err' in tem1:
-                                    self.c.execute("UPDATE CAPACITY SET TODAYDATA=1 WHERE INSTRID='%s'" % i[1])
-                                    self.conn.commit()
+                            continue
+                        """
 
 
 

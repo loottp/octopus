@@ -1,7 +1,7 @@
 import socket
 s = socket.socket()
-ip = '10.35.180.101'
-id = '3120IGEA1040'
+ip = '10.35.180.230'
+id = '222XWHYQ0535'
 user = 'administrator'
 password = '01234567'
 s.connect((ip, 81))
@@ -10,7 +10,7 @@ s.sendall(bytes(order, encoding="utf-8"))
 temp = s.recv(10)
 print(temp)
 
-order = "get /19+{0}+ste /http/1.1".format(id)
+order = "get /21+{0}+dat+5 /http/1.1".format(id)
 s.sendall(bytes(order, encoding="utf-8"))
-temp = s.recv(100)
+temp = s.recv(500)
 print(temp)
