@@ -382,7 +382,7 @@ def shiyunxing():
 
 def shiyunxingOne():
     print("--------------------------------")
-    dc = DataCollection('10.35.73.164', '431320060939', 'administrator', '01234567')
+    dc = DataCollection('10.35.65.9', 'J233DQYQ3501', 'administrator', '01234567')
     dc.Connect()
     if dc.conStatus == 2:
         status = dc.FiveMinuteData()
