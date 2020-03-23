@@ -10,6 +10,7 @@ import collectYqInfo
 from icmp_ping import *
 import sqlite3
 from collectYqInfo import DataCollection
+import time
 """
 dbOracle = Database()
 dbOracle.ConnectDatabase()
@@ -35,7 +36,7 @@ print(results)
 """
 class check:
     def __init__(self):
-        self.conn = sqlite3.connect('yq.db')
+        self.conn = sqlite3.connect('../web_oct/yq.db')
         self.c = self.conn.cursor()
         self.network = None
         self.collection = None
@@ -48,15 +49,19 @@ class check:
 
     def checkYQ(self):
         # 检查网络
-        yqinfo = list(self.c.execute("SELECT INSTRIP,INSTRID,USERNAME,PASSWORD,INSTRPROJECT FROM CAPACITY WHERE INSTRPROJECT=0"))
+        file = open('d:/1.txt', 'w+')
+        yqinfo = list(self.c.execute("SELECT INSTRIP,INSTRID,USERNAME,PASSWORD,INSTRPROJECT,INSTRTYPE FROM CAPACITY WHERE INSTRID='X411DQYQ0144'"))
+        print(yqinfo, len(yqinfo))
         for i in yqinfo:
             s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            s.settimeout(10)
             d = ping(i[0].strip(), timeout=2, count=2)
             if d == 0:
-                print(i[0]+'ip', "ok")
+                print(i[0]+'ping', "ok")
                 o_network = 0
                 try:
                     # 测试连接
+                    print("开始测试仪器连接")
                     s.connect((i[0].strip(), 81))
                     o_connect = 0
                 except:
@@ -64,8 +69,8 @@ class check:
                     self.c.execute("UPDATE CAPACITY SET CONNECTION=1 WHERE INSTRID='%s'" % i[1])
                     self.conn.commit()
                 else:
-
                     # 测试登录
+                    print("开始测试仪器登录")
                     order = "get /42+{0}+lin+{1}+{2} /http/1.1".format(i[1], i[2], i[3])
                     s.sendall(bytes(order, encoding="utf-8"))
                     tem = s.recv(10)
@@ -73,21 +78,24 @@ class check:
                         o_login = 0
                         """
                         # 测试仪器状态
+                        print("开始测试仪器状态", i[5])
                         order = "get /19+{0}+ste /http/1.1".format(i[1])
                         try:
                             s.sendall(bytes(order, encoding="utf-8"))
                         except:
                             print(i[0], '收集仪器状态出现异常')
                         else:
+
                             tem_status = s.recv(100)
                             print(tem_status)
                             if b'ack\n' in tem_status:
                                 o_yqstatus = 0
                             else:
                                 o_yqstatus = 1
-                        
 
+                        
                         # 测试实时数据
+                        print("开始测试仪器实时数据")
                         order = "get /21+{0}+dat+0 /http/1.1".format(i[1])
                         try:
                             s.sendall(bytes(order, encoding="utf-8"))
@@ -98,23 +106,24 @@ class check:
                             print(tem_real)
                             if b'ack\n' in tem_real:
                                 o_realdata = 0
-                                self.c.execute("UPDATE CAPACITY SET REALDATA=0 WHERE INSTRID='%s'" % i[1])
-                                self.conn.commit()
+
                             else:
                                 o_realdata = 1
-                                self.c.execute("UPDATE CAPACITY SET REALDATA=1 WHERE INSTRID='%s'" % i[1])
-                                self.conn.commit()
+
 
                             # 停止实时数据
                             order = "get /19+{0}+stp /http/1.1".format(i[1])
                             s.sendall(bytes(order, encoding="utf-8"))
                             tem_stop = s.recv(100)
-                        
+                        """
 
 
                         #不包括九五仪器
+
                         if i[4]==1:
+                            
                             #测试当天数据
+                            print("开始测试仪器当天数据")
                             order = "get /23+{0}+dat+1+0 /http/1.1".format(i[1])
                             try:
                                 s.sendall(bytes(order, encoding="utf-8"))
@@ -123,23 +132,31 @@ class check:
                             else:
                                 tem_todaydata = []
                                 while True:
-                                    data = s.recv(50000)
-
-                                    if not data: break
-                                    tem_todaydata.append(data)
-
-                                    tem1 = b''.join(tem_todaydata)
-                                    print(tem1)
-                                    if b'ack\n' in tem1:
-                                        self.c.execute("UPDATE CAPACITY SET TODAYDATA=0 WHERE INSTRID='%s'" % i[1])
-                                        self.conn.commit()
-                                        break
-                                    if b'$err' in tem1:
-                                        self.c.execute("UPDATE CAPACITY SET TODAYDATA=1 WHERE INSTRID='%s'" % i[1])
-                                        self.conn.commit()
+                                    try:
+                                        data = s.recv(50000)
+                                        print(data)
+                                        if not data: break
+                                        tem_todaydata.append(data)
+                                        tem1 = b''.join(tem_todaydata)
+                                        if b'ack\n' in tem1:
+                                            print(tem1)
+                                            '''
+                                            file.write(str(tem1))
+                                            file.flush()
+                                            self.c.execute("UPDATE CAPACITY SET TODAYDATA=0 WHERE INSTRID='%s'" % i[1])
+                                            self.conn.commit()
+                                            '''
+                                            break
+                                        if b'$err' in tem1:
+                                            self.c.execute("UPDATE CAPACITY SET TODAYDATA=1 WHERE INSTRID='%s'" % i[1])
+                                            self.conn.commit()
+                                            break
+                                    except socket.timeout:
+                                        print("采集当天数据阻塞")
                                         break
                                         
                             #测试五分钟数据
+                            print("开始测试仪器五分钟数据")
                             order = "get /21+{0}+dat+5 /http/1.1".format(i[1])
                             try:
                                 s.sendall(bytes(order, encoding="utf-8"))
@@ -156,12 +173,11 @@ class check:
                                     self.conn.commit()
                         else:
                             continue
+                            
                         """
-
-
-
-
-
+                        self.c.execute("UPDATE CAPACITY SET NETWORK=%d,CONNECTION=%d,LOGIN=%d,YQSTATUS=%d,REALDATA=%d WHERE INSTRID='%s'" % (o_network,o_connect,o_login,o_yqstatus,o_realdata,i[1]))
+                        self.conn.commit()
+                        """
                     else:
                         print('无法登录', tem)
                         self.c.execute("UPDATE CAPACITY SET LOGIN=1 WHERE INSTRID='%s'" % i[1])
