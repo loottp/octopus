@@ -50,8 +50,15 @@ class check:
     def checkYQ(self):
         # 检查网络
         file = open('d:/1.txt', 'w+')
-        yqinfo = list(self.c.execute("SELECT INSTRIP,INSTRID,USERNAME,PASSWORD,INSTRPROJECT,INSTRTYPE FROM CAPACITY WHERE INSTRID='X411DQYQ0144'"))
+        yqinfo = list(self.c.execute("SELECT INSTRIP,INSTRID,USERNAME,PASSWORD,INSTRPROJECT,INSTRTYPE FROM CAPACITY "))
         print(yqinfo, len(yqinfo))
+        o_network = 0
+        o_connect = 0
+        o_login = 0
+        o_yqstatus = 0
+        o_realdata = 0
+        o_todaydata = 0
+        o_fivedata = 0
         for i in yqinfo:
             s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
             s.settimeout(10)
@@ -59,8 +66,9 @@ class check:
             if d == 0:
                 print(i[0]+'ping', "ok")
                 o_network = 0
+
+                # 测试连接
                 try:
-                    # 测试连接
                     print("开始测试仪器连接")
                     s.connect((i[0].strip(), 81))
                     o_connect = 0
@@ -73,116 +81,132 @@ class check:
                     print("开始测试仪器登录")
                     order = "get /42+{0}+lin+{1}+{2} /http/1.1".format(i[1], i[2], i[3])
                     s.sendall(bytes(order, encoding="utf-8"))
-                    tem = s.recv(10)
-                    if tem == b'$ack\n':
-                        o_login = 0
-                        """
-                        # 测试仪器状态
-                        print("开始测试仪器状态", i[5])
-                        order = "get /19+{0}+ste /http/1.1".format(i[1])
-                        try:
+
+                    # 测试仪器状态、实时数据、当天数据、五分钟数据
+                    try:
+                        tem = s.recv(10)
+                        if tem == b'$ack\n':
+                            o_login = 0
+
+                            # 测试仪器状态
+                            print("开始测试仪器状态", i[5])
+                            order = "get /19+{0}+ste /http/1.1".format(i[1])
                             s.sendall(bytes(order, encoding="utf-8"))
-                        except:
-                            print(i[0], '收集仪器状态出现异常')
-                        else:
-
-                            tem_status = s.recv(100)
-                            print(tem_status)
-                            if b'ack\n' in tem_status:
-                                o_yqstatus = 0
-                            else:
-                                o_yqstatus = 1
-
-                        
-                        # 测试实时数据
-                        print("开始测试仪器实时数据")
-                        order = "get /21+{0}+dat+0 /http/1.1".format(i[1])
-                        try:
-                            s.sendall(bytes(order, encoding="utf-8"))
-                        except:
-                            print(i[0], '实时数据出现异常')
-                        else:
-                            tem_real = s.recv(300)
-                            print(tem_real)
-                            if b'ack\n' in tem_real:
-                                o_realdata = 0
-
-                            else:
-                                o_realdata = 1
-
-
-                            # 停止实时数据
-                            order = "get /19+{0}+stp /http/1.1".format(i[1])
-                            s.sendall(bytes(order, encoding="utf-8"))
-                            tem_stop = s.recv(100)
-                        """
-
-
-                        #不包括九五仪器
-
-                        if i[4]==1:
-                            
-                            #测试当天数据
-                            print("开始测试仪器当天数据")
-                            order = "get /23+{0}+dat+1+0 /http/1.1".format(i[1])
                             try:
+                                tem_status = s.recv(100)
+                                print(tem_status)
+                                if b'ack\n' in tem_status:
+                                    o_yqstatus = 0
+                                elif tem_status == b'$nak\n':
+                                    o_yqstatus = 1
+                                elif tem_status == b'$err\n':
+                                    o_yqstatus = 2
+                                else:
+                                    o_yqstatus = 4
+                            except socket.timeout:
+                                o_yqstatus = 3
+    
+                            
+                            # 测试实时数据
+                            print("开始测试仪器实时数据")
+                            order = "get /21+{0}+dat+0 /http/1.1".format(i[1])
+                            s.sendall(bytes(order, encoding="utf-8"))
+                            try:
+                                tem_real = s.recv(300)
+                                print(tem_real)
+                                if b'ack\n' in tem_real:
+                                    o_realdata = 0
+                                    # 停止实时数据
+                                    order = "get /19+{0}+stp /http/1.1".format(i[1])
+                                    s.sendall(bytes(order, encoding="utf-8"))
+                                    tem_stop = s.recv(100)
+                                elif tem_real == b'$nak\n':
+                                    o_realdata = 1
+                                elif tem_real == b'$err\n':
+                                    o_realdata = 2
+                                else:
+                                    o_realdata = 4
+
+                            except socket.timeout:
+                                o_realdata = 3
+    
+
+                            #不包括九五仪器
+
+                            if i[4] == 1:
+                                #测试当天数据
+                                print("开始测试仪器当天数据")
+                                order = "get /23+{0}+dat+1+0 /http/1.1".format(i[1])
                                 s.sendall(bytes(order, encoding="utf-8"))
-                            except:
-                                print(i[0], '当天数据出现异常')
-                            else:
                                 tem_todaydata = []
                                 while True:
                                     try:
                                         data = s.recv(50000)
-                                        print(data)
                                         if not data: break
                                         tem_todaydata.append(data)
                                         tem1 = b''.join(tem_todaydata)
                                         if b'ack\n' in tem1:
                                             print(tem1)
-                                            '''
-                                            file.write(str(tem1))
-                                            file.flush()
-                                            self.c.execute("UPDATE CAPACITY SET TODAYDATA=0 WHERE INSTRID='%s'" % i[1])
-                                            self.conn.commit()
-                                            '''
+                                            o_todaydata = 0
                                             break
-                                        if b'$err' in tem1:
-                                            self.c.execute("UPDATE CAPACITY SET TODAYDATA=1 WHERE INSTRID='%s'" % i[1])
-                                            self.conn.commit()
-                                            break
+                                        elif tem1 == '$nak\n':
+                                            o_todaydata = 1
+                                        elif tem1 == '$err\n':
+                                            o_todaydata = 2
+                                        else:
+                                            o_todaydata = 4
                                     except socket.timeout:
                                         print("采集当天数据阻塞")
+                                        o_todaydata = 3
                                         break
-                                        
-                            #测试五分钟数据
-                            print("开始测试仪器五分钟数据")
-                            order = "get /21+{0}+dat+5 /http/1.1".format(i[1])
-                            try:
-                                s.sendall(bytes(order, encoding="utf-8"))
-                            except:
-                                print(i[0], '五分钟数据出现异常')
-                            else:
-                                tem_fivedata = s.recv(500)
-                                print(tem_fivedata)
-                                if b'ack\n' in tem_fivedata:
-                                    self.c.execute("UPDATE CAPACITY SET FIVEDATA=0 WHERE INSTRID='%s'" % i[1])
-                                    self.conn.commit()
-                                else:
-                                    self.c.execute("UPDATE CAPACITY SET FIVEDATA=1 WHERE INSTRID='%s'" % i[1])
-                                    self.conn.commit()
-                        else:
-                            continue
-                            
-                        """
-                        self.c.execute("UPDATE CAPACITY SET NETWORK=%d,CONNECTION=%d,LOGIN=%d,YQSTATUS=%d,REALDATA=%d WHERE INSTRID='%s'" % (o_network,o_connect,o_login,o_yqstatus,o_realdata,i[1]))
-                        self.conn.commit()
-                        """
-                    else:
-                        print('无法登录', tem)
-                        self.c.execute("UPDATE CAPACITY SET LOGIN=1 WHERE INSTRID='%s'" % i[1])
-                        self.conn.commit()
 
+                                #测试五分钟数据
+                                print("开始测试仪器五分钟数据")
+                                order = "get /21+{0}+dat+5 /http/1.1".format(i[1])
+                                s.sendall(bytes(order, encoding="utf-8"))
+                                try:
+                                    tem_fivedata = s.recv(500)
+                                    print(tem_fivedata)
+                                    if b'ack\n' in tem_fivedata:
+                                        o_fivedata = 0
+                                    elif tem_fivedata == '$nak\n':
+                                        o_fivedata = 1
+                                    elif tem_fivedata == '$err\n':
+                                        o_fivedata = 2
+                                    else:
+                                        o_fivedata = 4
+                                except socket.timeout:
+                                    o_fivedata = 3
+
+                                # 十五仪器录入数据库
+                                self.c.execute(
+                                    "UPDATE CAPACITY SET NETWORK=%d,CONNECTION=%d,LOGIN=%d,YQSTATUS=%d,REALDATA=%d,TODAYDATA=%d,FIVEDATA=%d WHERE INSTRID='%s'" % \
+                                    (o_network, o_connect, o_login, o_yqstatus, o_realdata, o_todaydata, o_fivedata,i[1]))
+                                self.conn.commit()
+
+                            else:
+                                # 九五仪器录入数据库
+                                self.c.execute(
+                                    "UPDATE CAPACITY SET NETWORK=%d,CONNECTION=%d,LOGIN=%d,YQSTATUS=%d,REALDATA=%d WHERE INSTRID='%s'" % \
+                                    (o_network, o_connect, o_login, o_yqstatus, o_realdata,i[1]))
+                                self.conn.commit()
+
+
+
+
+
+                        elif tem == b'$nak\n':
+                            print('无此命令', tem)
+                            self.c.execute("UPDATE CAPACITY SET CONNECTION=0,LOGIN=1 WHERE INSTRID='%s'" % i[1])
+                            self.conn.commit()
+                        elif tem == b'$err\n':
+                            print('命令发送错误',tem)
+                            self.c.execute("UPDATE CAPACITY SET CONNECTION=0,LOGIN=2 WHERE INSTRID='%s'" % i[1])
+                            self.conn.commit()
+                    except socket.timeout:
+                        print("登录过程中接收数据发生超时，有阻塞")
+                        self.c.execute("UPDATE CAPACITY SET CONNECTION=0,LOGIN=3 WHERE INSTRID='%s'" % i[1])
+                        self.conn.commit()
             else:
                 print(i[0], "无法ping通")
                 self.c.execute("UPDATE CAPACITY SET NETWORK=1 WHERE INSTRID='%s'"%i[1])
