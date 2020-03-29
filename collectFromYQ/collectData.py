@@ -39,7 +39,7 @@ class DataCollection:
     def __init__(self, info):
         self.info = info
         self.conInstrument = socket.socket(socket.AF_INET, socket.SOCK_STREAM)  # 套接字对象，通过socket
-        self.conInstrument.settimeout(10)
+        self.conInstrument.settimeout(20)
         self.o_network = 0
         self.o_connect = 0
         self.o_login = 0
@@ -95,21 +95,19 @@ class DataCollection:
             self.o_login = 3
 
     #判断接收的数据是否正常
-    def check(self, oneData):
+    def Conversion_status(self, oneData):
         try:
-            data = oneData.split('\n')[1]
-            length = int(data.split(' ')[0])
+            data = oneData.split('\n')[1].split(' ')
             shijiLength = len(data)
-            if length == shijiLength or length < shijiLength or length - shijiLength == 1 :
-                return 1            #1为正常
-            elif length - len(data) == 8:   #重力仪特有缺少8个字符
-                return 2
+            print(shijiLength)
+            if shijiLength >= 10:
+                diffTime = round(time.time()-time.mktime(time.strptime(data[1],"%Y%m%d%H%M%S")))
+                return ( time.strftime("%Y%m%d%H%M%S", time.localtime()),  data[1], diffTime, data[2], data[4], data[5], data[8], data[9])
             else:
-                return 3            #0为出错误
+                diffTime = round(time.time() - time.mktime(time.strptime(data[1], "%Y%m%d%H%M%S")))
+                return  ( time.strftime("%Y%m%d%H%M%S", time.localtime()),  data[1], diffTime, data[2], data[4], data[5], None, None)
         except:
-            print(oneData)
-            self.dataFormatStatus = 2
-            return 0
+            print("状态数据出错", oneData)
 
     # 采集状态信息, 36 20191222214137 2 0 0 0 0 0 0 0 00 取1,2,4,5,8,9
     def Status(self):
@@ -122,15 +120,19 @@ class DataCollection:
             tem_status = self.conInstrument.recv(100)
             if b'ack\n' in tem_status:
                 self.o_yqstatus = 0
-                print(tem_status)
+                return self.Conversion_status(tem_status.decode())
             elif tem_status == b'$nak\n':
                 self.o_yqstatus = 1
+                return None
             elif tem_status == b'$err\n':
                 self.o_yqstatus = 2
+                return None
             else:
                 self.o_yqstatus = 4
+                return None
         except socket.timeout:
             self.o_yqstatus = 3
+            return None
 
     # 实时采集数据
     def RealTimeData(self):
@@ -147,12 +149,16 @@ class DataCollection:
                 #self.StopData()
             elif tem_real == b'$nak\n':
                 self.o_realdata = 1
+                print(tem_real)
             elif tem_real == b'$err\n':
                 self.o_realdata = 2
+                print(tem_real)
             else:
                 self.o_realdata = 4
+                print(tem_real)
         except socket.timeout:
             self.o_realdata = 3
+
 
     # 采集5分钟数据
     def FiveData(self):
@@ -230,44 +236,48 @@ class DataCollection:
 def Main():
     conn = sqlite3.connect('../web_oct/yq.db')
     c = conn.cursor()
-    yqinfo = list(c.execute("SELECT INSTRIP,INSTRID,USERNAME,PASSWORD,INSTRPROJECT,INSTRTYPE FROM CAPACITY WHERE INSTRID= '9100DQYL0552'"))
+    yqinfo = list(c.execute("SELECT INSTRIP,INSTRID,USERNAME,PASSWORD,INSTRPROJECT,INSTRTYPE FROM CAPACITY "))
     for i in yqinfo:
         dc = DataCollection(i)
         dc.Network()
-        dc.Connect()
-        dc.Login()
-        dc.Status()
-        dc.FiveData()
-        dc.TodayData()
-        dc.RealTimeData()
+        if dc.o_network == 0:
+            dc.Connect()
+            if dc.o_connect == 0:
+                dc.Login()
+                if dc.o_login == 0:
+                    dc.Status()
+                    #dc.FiveData()
+                    #dc.TodayData()
+                    #dc.RealTimeData()
+                    print(dc.o_realdata)
 
+def Status_dict():
+    for i in yqinfo:
+        dc = DataCollection(i)
+        dc.Network()
+        statusTab[i[1]]['network'] = dc.o_network
+        if dc.o_network == 0:
+            dc.Connect()
+            if dc.o_connect == 0:
+                dc.Login()
+                if dc.o_login == 0:
+                    statusTab[i[1]]['status'] = dc.Status()
 
+def Realdata_dict():
+    pass
 
 if __name__ == "__main__":
+    statusTab = {}
+    realdataTab = {}
+    conn = sqlite3.connect('../web_oct/yq.db')
+    c = conn.cursor()
+    yqinfo = list(c.execute("SELECT INSTRIP,INSTRID,USERNAME,PASSWORD,INSTRPROJECT,INSTRTYPE FROM CAPACITY "))
+    for i in yqinfo:
+        statusTab[i[1]] = {'network': None, 'status': None}
+        realdataTab[i[1]] = {'lastTime':None, 'data':None}
     print("开始")
-    Main()
-    #dc = DataCollection("10.35.185.100", "9100DQYL0308", "administrator", "01234567")
-    #dc = DataCollection("10.35.180.253", "X212MGPH0144", "administrator", "01234567")
-    #dc = DataCollection("10.35.179.130", "X212MGPH0147", "administrator", "01234567")
-    #dc = DataCollection("10.35.185.111", "J222DQYQ9548", "administrator", "01234567")
-    #dc = DataCollection("10.35.185.112", "X212MGPH0143", "administrator", "01234567")
-    #dc = DataCollection("10.35.177.125", "X222WHYQ3056", "admin", "xm361003")
-    #dc = DataCollection("10.35.186.103", "X312JSEA1803", "administrator", "01234567")
-    #dc = DataCollection("10.35.184.101", "X312JSEA1005", "administrator", "01234567")
-    #dc = DataCollection("10.35.178.20", "X212MGPH0092", "administrator", "01234567")
-    #dc.Connect()
-    #if dc.conStatus == 2:
-        #todaydata = dc.TodayDataColl()
-        #status = dc.Status()
-        #curData = dc.FiveMinuteData()
-        #print(status,curData)
-        #data1 = dc.MeasurementParameter()
-        #print(data1)
-        #p = Process(target=dc.RealTimeData, args=())
-        #p.start()
-        #dc.TodayData()
-        #p.join()
-        #dc.FiveMinuteData()
-        #print(status, curData, data1)
-    #print(dc.conStatus, dc.sendStatus, dc.recvStatus, dc.dataFormatStatus)
+    #Status_dict()
+    #print(StatusTab)
+
+
     print("结束")
