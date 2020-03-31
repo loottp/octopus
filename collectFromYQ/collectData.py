@@ -39,7 +39,7 @@ class DataCollection:
     def __init__(self, info):
         self.info = info
         self.conInstrument = socket.socket(socket.AF_INET, socket.SOCK_STREAM)  # 套接字对象，通过socket
-        self.conInstrument.settimeout(20)
+        self.conInstrument.settimeout(100)
         self.o_network = 0
         self.o_connect = 0
         self.o_login = 0
@@ -139,25 +139,25 @@ class DataCollection:
         print("开始测试仪器实时数据")
         order = "get /21+{0}+dat+0 /http/1.1".format(self.info[1])
         self.conInstrument.sendall(bytes(order, encoding="utf-8"))
-        try:
-            tem_real = self.conInstrument.recv(300)
-
-            if b'ack\n' in tem_real:
-                self.o_realdata = 0
-                print(tem_real)
-                # 停止实时数据
-                #self.StopData()
-            elif tem_real == b'$nak\n':
-                self.o_realdata = 1
-                print(tem_real)
-            elif tem_real == b'$err\n':
-                self.o_realdata = 2
-                print(tem_real)
-            else:
-                self.o_realdata = 4
-                print(tem_real)
-        except socket.timeout:
-            self.o_realdata = 3
+        while True:
+            try:
+                tem_real = self.conInstrument.recv(300)
+                if b'ack\n' in tem_real:
+                    self.o_realdata = 0
+                    print(tem_real)
+                    # 停止实时数据
+                    #self.StopData()
+                elif tem_real == b'$nak\n':
+                    self.o_realdata = 1
+                    print(tem_real)
+                elif tem_real == b'$err\n':
+                    self.o_realdata = 2
+                    print(tem_real)
+                else:
+                    self.o_realdata = 4
+                    print(tem_real)
+            except socket.timeout:
+                self.o_realdata = 3
 
 
     # 采集5分钟数据
@@ -236,7 +236,7 @@ class DataCollection:
 def Main():
     conn = sqlite3.connect('../web_oct/yq.db')
     c = conn.cursor()
-    yqinfo = list(c.execute("SELECT INSTRIP,INSTRID,USERNAME,PASSWORD,INSTRPROJECT,INSTRTYPE FROM CAPACITY "))
+    yqinfo = list(c.execute("SELECT INSTRIP,INSTRID,USERNAME,PASSWORD,INSTRPROJECT,INSTRTYPE FROM CAPACITY WHERE INSTRID = 'X222WHYQ3021'"))
     for i in yqinfo:
         dc = DataCollection(i)
         dc.Network()
@@ -245,10 +245,10 @@ def Main():
             if dc.o_connect == 0:
                 dc.Login()
                 if dc.o_login == 0:
-                    dc.Status()
+                    #dc.Status()
                     #dc.FiveData()
                     #dc.TodayData()
-                    #dc.RealTimeData()
+                    dc.RealTimeData()
                     print(dc.o_realdata)
 
 def Status_dict():
@@ -263,21 +263,56 @@ def Status_dict():
                 if dc.o_login == 0:
                     statusTab[i[1]]['status'] = dc.Status()
 
-def Realdata_dict():
-    pass
+def Realdata_dict(yqAlone):
+    dc = DataCollection(yqAlone)
+    dc.Network()
+    if dc.o_network == 0:
+        dc.Connect()
+        if dc.o_connect == 0:
+            dc.Login()
+            if dc.o_login == 0:
+                dc.RealTimeData()
+
+def MainYqRealTime():
+    "主函数"
+    print("开始")
+    # 开多进程
+    starttime = time.time()
+    threads = []
+    nloops = range(len(yqinfo))
+    for i in nloops:
+        t = threading.Thread(target=Realdata_dict, args=(yqinfo[i],))
+        threads.append(t)
+    for i in range(len(yqinfo)):
+        threads[i].start()
+    endtime = time.time()
+    huatime =  endtime-starttime
+    print('all Done at:',huatime)
+
+
 
 if __name__ == "__main__":
+
     statusTab = {}
     realdataTab = {}
+
     conn = sqlite3.connect('../web_oct/yq.db')
     c = conn.cursor()
-    yqinfo = list(c.execute("SELECT INSTRIP,INSTRID,USERNAME,PASSWORD,INSTRPROJECT,INSTRTYPE FROM CAPACITY "))
+    yqinfo = list(c.execute("SELECT INSTRIP,INSTRID,USERNAME,PASSWORD,INSTRPROJECT,INSTRTYPE FROM CAPACITY WHERE REALDATA = 0"))
+
     for i in yqinfo:
         statusTab[i[1]] = {'network': None, 'status': None}
         realdataTab[i[1]] = {'lastTime':None, 'data':None}
     print("开始")
+    """
     #Status_dict()
-    #print(StatusTab)
+    for k,v in statusTab.items():
+        if v['status'] is not None:
+            print(v['status'][2])
+        else:
+            print('无')
 
-
+    #Main()
+    """
+    MainYqRealTime()
     print("结束")
