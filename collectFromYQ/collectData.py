@@ -73,11 +73,14 @@ class DataCollection:
         except socket.timeout:
             print('无法连接')
             self.o_connect = 1
+        except TimeoutError:
+            print('无法连接')
+            self.o_connect = 1
 
     #登录仪器
     def Login(self):
         print("开始测试%s仪器登录"%self.info[5])
-        order = "get /42+{0}+lin+{1}+{2} /http/1.1".format(self.info[1], self.info[2], self.info[3])
+        order = "get /42+{0}+lin+{1}+{2} /http/1.1".format(self.info[1], self.info[4], self.info[5])
         self.conInstrument.sendall(bytes(order, encoding="utf-8"))
         try:
             tem = self.conInstrument.recv(100)
@@ -144,7 +147,16 @@ class DataCollection:
                 tem_real = self.conInstrument.recv(300)
                 if b'ack\n' in tem_real:
                     self.o_realdata = 0
-                    print(tem_real)
+                    dataContent = tem_real.decode().split('\n')[1].split(' ')  # 数据包的主内容
+                    print(dataContent)
+                    dataTime = dataContent[1]
+                    dataSample = dataContent[4]
+                    dataLength = int(dataContent[5])
+                    data = [dataTime,dataContent[-dataLength:]]
+                    realdataTab[self.info[1]]['data'].append(data)
+                    lock.acquire()
+                    realdataTab['data'] = dataContent
+                    lock.release()
                     # 停止实时数据
                     #self.StopData()
                 elif tem_real == b'$nak\n':
@@ -159,6 +171,31 @@ class DataCollection:
             except socket.timeout:
                 self.o_realdata = 3
 
+    # 实时采集数据（一个）
+    def RealTimeOneData(self):
+        print("开始测试仪器实时数据")
+        order = "get /21+{0}+dat+0 /http/1.1".format(self.info[1])
+        self.conInstrument.sendall(bytes(order, encoding="utf-8"))
+        try:
+            tem_real = self.conInstrument.recv(300)
+            if b'ack\n' in tem_real:
+                self.o_realdata = 0
+                print(tem_real)
+
+                # 停止实时数据
+                #self.StopData()
+            elif tem_real == b'$nak\n':
+                self.o_realdata = 1
+                print(tem_real)
+            elif tem_real == b'$err\n':
+                self.o_realdata = 2
+                print(tem_real)
+            else:
+                self.o_realdata = 4
+                print(tem_real)
+        except socket.timeout:
+            self.o_realdata = 3
+
 
     # 采集5分钟数据
     def FiveData(self):
@@ -171,6 +208,7 @@ class DataCollection:
             if b'ack\n' in tem_fivedata:
                 self.o_fivedata = 0
                 print(tem_fivedata)
+
             elif tem_fivedata == '$nak\n':
                 self.o_fivedata = 1
             elif tem_fivedata == '$err\n':
@@ -233,10 +271,10 @@ class DataCollection:
                 break
 
 
-def Main():
+def Main1():
     conn = sqlite3.connect('../web_oct/yq.db')
     c = conn.cursor()
-    yqinfo = list(c.execute("SELECT INSTRIP,INSTRID,USERNAME,PASSWORD,INSTRPROJECT,INSTRTYPE FROM CAPACITY WHERE INSTRID = 'X222WHYQ3021'"))
+    yqinfo = list(c.execute("SELECT INSTRIP,INSTRID,USERNAME,PASSWORD,INSTRPROJECT,INSTRTYPE FROM CAPACITY "))
     for i in yqinfo:
         dc = DataCollection(i)
         dc.Network()
@@ -246,9 +284,10 @@ def Main():
                 dc.Login()
                 if dc.o_login == 0:
                     #dc.Status()
-                    #dc.FiveData()
+                    dc.FiveData()
                     #dc.TodayData()
-                    dc.RealTimeData()
+                    #dc.RealTimeOneData()
+
                     print(dc.o_realdata)
 
 def Status_dict():
@@ -289,21 +328,39 @@ def MainYqRealTime():
     huatime =  endtime-starttime
     print('all Done at:',huatime)
 
-
-
-if __name__ == "__main__":
-
+def Main():
+    # 定义变量
+    global attributeTab         # 属性字典
+    global statusTab            # 状态字典
+    global realdataTab          # 实时数据字典
+    attributeTab = {}
     statusTab = {}
     realdataTab = {}
 
     conn = sqlite3.connect('../web_oct/yq.db')
     c = conn.cursor()
-    yqinfo = list(c.execute("SELECT INSTRIP,INSTRID,USERNAME,PASSWORD,INSTRPROJECT,INSTRTYPE FROM CAPACITY WHERE REALDATA = 0"))
+    yqinfo = list(c.execute("SELECT * FROM CAPACITY"))
+    for i in yqinfo:
+        attributeTab[i[1]] = {'instrip': i[0].strip(), 'stationid':i[2], 'pointid':i[3], 'username':i[4], \
+                              'password':i[5], 'instrproject':i[6], 'stationname':i[7],'instrname':i[8],\
+                              'instrtype':i[9], 'samplerate': i[10], 'itemnum':i[11], 'network':i[12],\
+                              'connection':i[13], 'login': i[14], 'yqstatus': i[15], 'realdata':i[16],\
+                              'todaydata':i[17], 'fivedata':i[18]}
+        statusTab[i[1]] = {'network': None, 'status': None}
+        realdataTab[i[1]] = {'lastTime': None, 'length':0, 'data': []}
+
+if __name__ == "__main__":
+
+    Main()
+    print(attributeTab)
+    """
+    yqinfo = list(c.execute("SELECT INSTRIP,INSTRID,USERNAME,PASSWORD,INSTRPROJECT,INSTRTYPE FROM CAPACITY WHERE REALDATA=0"))
 
     for i in yqinfo:
         statusTab[i[1]] = {'network': None, 'status': None}
-        realdataTab[i[1]] = {'lastTime':None, 'data':None}
+        realdataTab[i[1]] = {'lastTime':None, 'data':[]}
     print("开始")
+    """
     """
     #Status_dict()
     for k,v in statusTab.items():
@@ -311,8 +368,8 @@ if __name__ == "__main__":
             print(v['status'][2])
         else:
             print('无')
-
-    #Main()
     """
-    MainYqRealTime()
+    #Main()
+
+    #MainYqRealTime()
     print("结束")
