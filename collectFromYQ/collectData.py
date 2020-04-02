@@ -142,34 +142,48 @@ class DataCollection:
         print("开始测试仪器实时数据")
         order = "get /21+{0}+dat+0 /http/1.1".format(self.info[1])
         self.conInstrument.sendall(bytes(order, encoding="utf-8"))
+        itemnum = attributeTab[self.info[1]]['itemnum']
+        print(itemnum)
+        noneLength = 0
         while True:
             try:
                 tem_real = self.conInstrument.recv(300)
                 if b'ack\n' in tem_real:
+                    noneLength = 0
+                    statusTab[self.info[1]]['importData'] = 0
                     self.o_realdata = 0
                     dataContent = tem_real.decode().split('\n')[1].split(' ')  # 数据包的主内容
-                    print(dataContent)
                     dataTime = dataContent[1]
-                    dataSample = dataContent[4]
-                    dataLength = int(dataContent[5])
-                    data = [dataTime,dataContent[-dataLength:]]
-                    realdataTab[self.info[1]]['data'].append(data)
-                    lock.acquire()
-                    realdataTab['data'] = dataContent
-                    lock.release()
-                    # 停止实时数据
-                    #self.StopData()
+                    data = [dataTime,dataContent[-itemnum:]]
+                    #lock.acquire()
+                    realdataTab[self.info[1]]['data'].insert(0, data)
+                    realdataTab[self.info[1]]['length'] = realdataTab[self.info[1]]['length'] + 1
+                    if realdataTab[self.info[1]]['length'] > 5:
+                        realdataTab[self.info[1]]['data'].pop()
+                        realdataTab[self.info[1]]['length'] = realdataTab[self.info[1]]['length'] - 1
+                    #lock.release()
+
                 elif tem_real == b'$nak\n':
                     self.o_realdata = 1
                     print(tem_real)
+                    statusTab[self.info[1]]['importData'] = 1
                 elif tem_real == b'$err\n':
                     self.o_realdata = 2
                     print(tem_real)
+                    statusTab[self.info[1]]['importData'] = 1
+                elif tem_real == b'':
+                    noneLength += 1
+                    if noneLength > 100:
+                        statusTab[self.info[1]]['importData'] = 1
+                        # 这里需要发出信号，重启线程
+                        break
                 else:
                     self.o_realdata = 4
                     print(tem_real)
+                    statusTab[self.info[1]]['importData'] = 1
             except socket.timeout:
                 self.o_realdata = 3
+                statusTab[self.info[1]]['importData'] = 1
 
     # 实时采集数据（一个）
     def RealTimeOneData(self):
@@ -290,29 +304,28 @@ def Main1():
 
                     print(dc.o_realdata)
 
-def Status_dict():
-    for i in yqinfo:
-        dc = DataCollection(i)
-        dc.Network()
-        statusTab[i[1]]['network'] = dc.o_network
-        if dc.o_network == 0:
-            dc.Connect()
-            if dc.o_connect == 0:
-                dc.Login()
-                if dc.o_login == 0:
-                    statusTab[i[1]]['status'] = dc.Status()
 
-def Realdata_dict(yqAlone):
-    dc = DataCollection(yqAlone)
+
+def Realdata_dict(yqOne):
+    dc = DataCollection(yqOne)
     dc.Network()
     if dc.o_network == 0:
+        statusTab[yqOne[1]]['network'] = 0
         dc.Connect()
         if dc.o_connect == 0:
+            statusTab[yqOne[1]]['connection'] = 0
             dc.Login()
             if dc.o_login == 0:
+                statusTab[yqOne[1]]['login'] = 0
                 dc.RealTimeData()
+            else:
+                statusTab[yqOne[1]]['login'] = 1
+        else:
+            statusTab[yqOne[1]]['connection'] = 1
+    else:
+        statusTab[yqOne[1]]['network'] = 1
 
-def MainYqRealTime():
+def MainYqRealTime(yqinfo):
     "主函数"
     print("开始")
     # 开多进程
@@ -328,6 +341,20 @@ def MainYqRealTime():
     huatime =  endtime-starttime
     print('all Done at:',huatime)
 
+def Status_dict(yqinfo):
+    while True:
+        for i in yqinfo:
+            dc = DataCollection(i)
+            dc.Network()
+            statusTab[i[1]]['network'] = dc.o_network
+            if dc.o_network == 0:
+                dc.Connect()
+                if dc.o_connect == 0:
+                    dc.Login()
+                    if dc.o_login == 0:
+                        statusTab[i[1]]['status'] = dc.Status()
+        time.sleep(300)
+
 def Main():
     # 定义变量
     global attributeTab         # 属性字典
@@ -336,6 +363,7 @@ def Main():
     attributeTab = {}
     statusTab = {}
     realdataTab = {}
+    threads = []
 
     conn = sqlite3.connect('../web_oct/yq.db')
     c = conn.cursor()
@@ -346,13 +374,23 @@ def Main():
                               'instrtype':i[9], 'samplerate': i[10], 'itemnum':i[11], 'network':i[12],\
                               'connection':i[13], 'login': i[14], 'yqstatus': i[15], 'realdata':i[16],\
                               'todaydata':i[17], 'fivedata':i[18]}
-        statusTab[i[1]] = {'network': None, 'status': None}
+        statusTab[i[1]] = {'network': None, 'status': None, 'connection':None, 'login':None, 'importData':None}
         realdataTab[i[1]] = {'lastTime': None, 'length':0, 'data': []}
+    print(type(attributeTab['X212MGPH0092']['itemnum']))
+    t = threading.Thread(target=Status_dict, args=(yqinfo,))
+    threads.append(t)
+    for i in yqinfo:
+        if i[16] == 0:
+            t = threading.Thread(target=Realdata_dict, args=(i,))
+            threads.append(t)
+    for i in threads:
+        i.start()
+
 
 if __name__ == "__main__":
 
     Main()
-    print(attributeTab)
+    print(statusTab)
     """
     yqinfo = list(c.execute("SELECT INSTRIP,INSTRID,USERNAME,PASSWORD,INSTRPROJECT,INSTRTYPE FROM CAPACITY WHERE REALDATA=0"))
 

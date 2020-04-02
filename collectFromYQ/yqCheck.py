@@ -50,7 +50,7 @@ class check:
     def checkYQ(self):
         # 检查网络
         file = open('d:/1.txt', 'w+')
-        yqinfo = list(self.c.execute("SELECT INSTRIP,INSTRID,USERNAME,PASSWORD,INSTRPROJECT,INSTRTYPE FROM CAPACITY "))
+        yqinfo = list(self.c.execute("SELECT INSTRIP,INSTRID,USERNAME,PASSWORD,INSTRPROJECT,INSTRTYPE FROM CAPACITY where instrid='X212MGPH0144'"))
         print(yqinfo, len(yqinfo))
         o_network = 0
         o_connect = 0
