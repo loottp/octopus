@@ -25,12 +25,16 @@ import matplotlib.pyplot as plt
 import numpy as np
 import io
 from DB.database import Database
+import re
 
 
 import threading
+import logging
+import traceback
 
 lock = threading.Lock()
-
+LOG_FORMAT = "%(asctime)s - %(levelname)s - %(threadName)s - %(thread)d - %(message)s"
+logging.basicConfig(filename='log.log', format=LOG_FORMAT)
 
 class DataCollection:
     '数据采集、信息采集'
@@ -53,10 +57,9 @@ class DataCollection:
         print('开始测试%s网络' % self.info[0])
         d = ping(self.info[0].strip(), timeout=2, count=2)
         if d == 0:
-            o_network = 0
-            print('网络正常')
+            self.o_network = 0
         else:
-            o_network = 1
+            self.o_network = 1
             print('网络异常')
 
 
@@ -69,7 +72,6 @@ class DataCollection:
         try:
             self.conInstrument.connect((self.info[0].strip(), 81))
             self.o_connect = 0
-            print('连接正常')
         except socket.timeout:
             print('无法连接')
             self.o_connect = 1
@@ -79,15 +81,13 @@ class DataCollection:
 
     #登录仪器
     def Login(self):
-        print("开始测试%s仪器登录"%self.info[5])
+        print("开始测试%s仪器登录"%self.info[0])
         order = "get /42+{0}+lin+{1}+{2} /http/1.1".format(self.info[1], self.info[4], self.info[5])
         self.conInstrument.sendall(bytes(order, encoding="utf-8"))
         try:
             tem = self.conInstrument.recv(100)
-            print(tem)
             if b'ack\n' in tem:
                 self.o_login = 0
-                print('登录正常')
             elif tem == b'$nak\n':
                 self.o_login = 1
             elif tem == b'$err\n':
@@ -139,20 +139,25 @@ class DataCollection:
 
     # 实时采集数据
     def RealTimeData(self):
+        print(threading.currentThread().ident)
         print("开始测试仪器实时数据")
         order = "get /21+{0}+dat+0 /http/1.1".format(self.info[1])
         self.conInstrument.sendall(bytes(order, encoding="utf-8"))
         itemnum = attributeTab[self.info[1]]['itemnum']
         print(itemnum)
         noneLength = 0
+        tem_real = b''
         while True:
             try:
-                tem_real = self.conInstrument.recv(300)
-                if b'ack\n' in tem_real:
+                tem_real += self.conInstrument.recv(300)
+                content_ack = re.match(b'\$(.*?)ack\n', tem_real, re.DOTALL)
+
+                if content_ack is not None:
+                    tem_real = tem_real[content_ack.span()[1]:]
                     noneLength = 0
                     statusTab[self.info[1]]['importData'] = 0
                     self.o_realdata = 0
-                    dataContent = tem_real.decode().split('\n')[1].split(' ')  # 数据包的主内容
+                    dataContent = content_ack.group().decode().split('\n')[1].split(' ')  # 数据包的主内容
                     dataTime = dataContent[1]
                     data = [dataTime,dataContent[-itemnum:]]
                     #lock.acquire()
@@ -162,28 +167,50 @@ class DataCollection:
                         realdataTab[self.info[1]]['data'].pop()
                         realdataTab[self.info[1]]['length'] = realdataTab[self.info[1]]['length'] - 1
                     #lock.release()
-
-                elif tem_real == b'$nak\n':
-                    self.o_realdata = 1
-                    print(tem_real)
-                    statusTab[self.info[1]]['importData'] = 1
-                elif tem_real == b'$err\n':
-                    self.o_realdata = 2
-                    print(tem_real)
-                    statusTab[self.info[1]]['importData'] = 1
-                elif tem_real == b'':
-                    noneLength += 1
-                    if noneLength > 100:
-                        statusTab[self.info[1]]['importData'] = 1
-                        # 这里需要发出信号，重启线程
-                        break
                 else:
-                    self.o_realdata = 4
-                    print(tem_real)
-                    statusTab[self.info[1]]['importData'] = 1
+                    content_nak = re.match(b'\$nak\n', tem_real, re.DOTALL)
+                    if content_nak is not None:
+                        print(tem_real)
+                        tem_real = tem_real[content_nak.span()[1]:]
+                        self.o_realdata = 1
+                        statusTab[self.info[1]]['importData'] = 1
+                    else:
+                        content_err = re.match(b'\$err\n', tem_real, re.DOTALL)
+                        if content_err is not None:
+                            print(tem_real)
+                            tem_real = tem_real[content_err.span()[1]:]
+                            self.o_realdata = 2
+                            statusTab[self.info[1]]['importData'] = 1
+
+                        elif tem_real == b'':
+                            noneLength += 1
+                            if noneLength > 100:
+                                statusTab[self.info[1]]['importData'] = 1
+                                # 这里需要发出信号，重启线程
+                                msg = self.info[0] + self.info[1] + self.info[2] + self.info[3] + self.info[7] + '变量tem_reals收到空数据大于300'
+                                logging.warning(msg)
+                                self.Close()
+                                break
+
+                        elif len(tem_real)>600:
+                            msg = self.info[0] + self.info[1] + self.info[2] + self.info[3] + self.info[7] + '出现异常,变量tem_reals数据大于600' + tem_real.decode()
+                            logging.warning(msg)
+                            self.Close()
+                            break
+
             except socket.timeout:
                 self.o_realdata = 3
                 statusTab[self.info[1]]['importData'] = 1
+                msg = self.info[0] + self.info[1] + self.info[2] + self.info[3] + self.info[7] + '超时，发生了阻塞'
+                logging.warning(msg)
+                self.Close()
+                break
+            except:
+                s = traceback.format_exc()
+                logging.error(s)
+                msg = self.info[0]+self.info[1]+self.info[2]+self.info[3]+self.info[7]+'出现异常,变量tem_real:'+tem_real.decode()
+                logging.warning(msg)
+                break
 
     # 实时采集数据（一个）
     def RealTimeOneData(self):
@@ -307,23 +334,24 @@ def Main1():
 
 
 def Realdata_dict(yqOne):
-    dc = DataCollection(yqOne)
-    dc.Network()
-    if dc.o_network == 0:
-        statusTab[yqOne[1]]['network'] = 0
-        dc.Connect()
-        if dc.o_connect == 0:
-            statusTab[yqOne[1]]['connection'] = 0
-            dc.Login()
-            if dc.o_login == 0:
-                statusTab[yqOne[1]]['login'] = 0
-                dc.RealTimeData()
+    while True:
+        dc = DataCollection(yqOne)
+        dc.Network()
+        if dc.o_network == 0:
+            statusTab[yqOne[1]]['network'] = 0
+            dc.Connect()
+            if dc.o_connect == 0:
+                statusTab[yqOne[1]]['connection'] = 0
+                dc.Login()
+                if dc.o_login == 0:
+                    statusTab[yqOne[1]]['login'] = 0
+                    dc.RealTimeData()
+                else:
+                    statusTab[yqOne[1]]['login'] = 1
             else:
-                statusTab[yqOne[1]]['login'] = 1
+                statusTab[yqOne[1]]['connection'] = 1
         else:
-            statusTab[yqOne[1]]['connection'] = 1
-    else:
-        statusTab[yqOne[1]]['network'] = 1
+            statusTab[yqOne[1]]['network'] = 1
 
 def MainYqRealTime(yqinfo):
     "主函数"
@@ -376,7 +404,6 @@ def Main():
                               'todaydata':i[17], 'fivedata':i[18]}
         statusTab[i[1]] = {'network': None, 'status': None, 'connection':None, 'login':None, 'importData':None}
         realdataTab[i[1]] = {'lastTime': None, 'length':0, 'data': []}
-    print(type(attributeTab['X212MGPH0092']['itemnum']))
     t = threading.Thread(target=Status_dict, args=(yqinfo,))
     threads.append(t)
     for i in yqinfo:
