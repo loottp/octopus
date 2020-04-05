@@ -32,6 +32,50 @@ import threading
 import logging
 import traceback
 
+import queue
+import threading
+
+
+exitFlag = 0
+
+class myThread (threading.Thread):
+    def __init__(self, threadID, name, q):
+        threading.Thread.__init__(self)
+        self.threadID = threadID
+        self.name = name
+        self.q = q
+    def run(self):
+        print ("开启线程：" + self.name)
+        process_data(self.name, self.q)
+        print ("退出线程：" + self.name)
+
+def process_data(threadName, q):
+    while True:
+        queueLock.acquire()
+        if not workQueue.empty():
+            data = q.get()
+            print(data)
+            queueLock.release()
+            dc = DataCollection(data)
+            dc.Network()
+            statusTab[data[1]]['network'] = dc.o_network
+            if dc.o_network == 0:
+                dc.Connect()
+                if dc.o_connect == 0:
+                    dc.Login()
+                    if dc.o_login == 0:
+                        statusTab[data[1]]['status'] = dc.Status()
+                        if data[16] == 1 and data[17] == 0:
+                            dc.FiveData()
+            print ("%s processing %s" % (threadName, data))
+        else:
+            print("我在1号位")
+            queueLock.release()
+        time.sleep(5)
+workQueue = queue.Queue(70)
+queueLock = threading.Lock()
+
+
 lock = threading.Lock()
 LOG_FORMAT = "%(asctime)s - %(levelname)s - %(threadName)s - %(thread)d - %(message)s"
 logging.basicConfig(filename='log.log', format=LOG_FORMAT)
@@ -43,7 +87,7 @@ class DataCollection:
     def __init__(self, info):
         self.info = info
         self.conInstrument = socket.socket(socket.AF_INET, socket.SOCK_STREAM)  # 套接字对象，通过socket
-        self.conInstrument.settimeout(100)
+        self.conInstrument.settimeout(10)
         self.o_network = 0
         self.o_connect = 0
         self.o_login = 0
@@ -139,6 +183,7 @@ class DataCollection:
 
     # 实时采集数据
     def RealTimeData(self):
+        self.conInstrument.settimeout(100)
         print(threading.currentThread().ident)
         print("开始测试仪器实时数据")
         order = "get /21+{0}+dat+0 /http/1.1".format(self.info[1])
@@ -237,9 +282,8 @@ class DataCollection:
         except socket.timeout:
             self.o_realdata = 3
 
-
-    # 采集5分钟数据
-    def FiveData(self):
+    # 采集5分钟数据,实验用
+    def FiveData_1(self):
         '采集状态仪器状态信息，通过get /19+id+ste /http/1.1'
         print("开始测试仪器五分钟数据")
         order = "get /21+{0}+dat+5 /http/1.1".format(self.info[1])
@@ -258,6 +302,50 @@ class DataCollection:
                 self.o_fivedata = 4
         except socket.timeout:
             self.o_fivedata = 3
+
+    # 采集5分钟数据
+    def FiveData(self):
+        '采集状态仪器状态信息，通过get /19+id+ste /http/1.1'
+        print("开始测试仪器五分钟数据")
+        itemnum = attributeTab[self.info[1]]['itemnum']
+        order = "get /21+{0}+dat+5 /http/1.1".format(self.info[1])
+        self.conInstrument.sendall(bytes(order, encoding="utf-8"))
+        try:
+            tem_fivedata = self.conInstrument.recv(500)
+            if b'ack\n' in tem_fivedata:
+                self.o_fivedata = 0
+                print(tem_fivedata)
+                dataContent = tem_fivedata.decode().split('\n')[1].split(' ')  # 数据包的主内容
+                dataTime = dataContent[1]
+                data = [dataTime, dataContent[-itemnum-1:-1]]
+                # 插入数据
+                realdataTab[self.info[1]]['data'].insert(0, data)
+                realdataTab[self.info[1]]['length'] = realdataTab[self.info[1]]['length'] + 1
+                if realdataTab[self.info[1]]['length'] > 5:
+                    realdataTab[self.info[1]]['data'].pop()
+                    realdataTab[self.info[1]]['length'] = realdataTab[self.info[1]]['length'] - 1
+
+
+            elif tem_fivedata == b'$nak\n':
+                self.o_fivedata = 1
+                msg = self.info[0] + self.info[1] + self.info[2] + self.info[3] + self.info[7] + '变量tem_fivedata收到数据nak'
+                logging.warning(msg)
+                self.Close()
+            elif tem_fivedata == b'$err\n':
+                self.o_fivedata = 2
+                msg = self.info[0] + self.info[1] + self.info[2] + self.info[3] + self.info[7] + '变量tem_fivedata收到数据err'
+                logging.warning(msg)
+                self.Close()
+            else:
+                self.o_fivedata = 4
+                msg = self.info[0] + self.info[1] + self.info[2] + self.info[3] + self.info[7] + '变量tem_fivedata收到无法解析的数据'
+                logging.warning(msg)
+                self.Close()
+        except socket.timeout:
+            self.o_fivedata = 3
+            msg = self.info[0] + self.info[1] + self.info[2] + self.info[3] + self.info[7] + '超时，发生了阻塞'
+            logging.warning(msg)
+            self.Close()
 
     # 终止实时数据
     def StopData(self):
@@ -332,7 +420,6 @@ def Main1():
                     print(dc.o_realdata)
 
 
-
 def Realdata_dict(yqOne):
     while True:
         dc = DataCollection(yqOne)
@@ -370,18 +457,29 @@ def MainYqRealTime(yqinfo):
     print('all Done at:',huatime)
 
 def Status_dict(yqinfo):
+    threadList = ["Thread-1", "Thread-2", "Thread-3"]
+    threadID = 1
+    threads1 = []
+    for tName in threadList:
+        thread = myThread(threadID, tName, workQueue)
+        thread.start()
+        threads1.append(thread)
+        threadID += 1
+    print('我在这里')
     while True:
+
+        queueLock.acquire()
         for i in yqinfo:
-            dc = DataCollection(i)
-            dc.Network()
-            statusTab[i[1]]['network'] = dc.o_network
-            if dc.o_network == 0:
-                dc.Connect()
-                if dc.o_connect == 0:
-                    dc.Login()
-                    if dc.o_login == 0:
-                        statusTab[i[1]]['status'] = dc.Status()
-        time.sleep(300)
+            print(i)
+            workQueue.put(i)
+        queueLock.release()
+
+
+        startTime = time.time()
+        print('?????')
+        endTime = time.time()
+        print("本次用时：", endTime - startTime)
+        time.sleep(60)
 
 def Main():
     # 定义变量
@@ -406,10 +504,12 @@ def Main():
         realdataTab[i[1]] = {'lastTime': None, 'length':0, 'data': []}
     t = threading.Thread(target=Status_dict, args=(yqinfo,))
     threads.append(t)
+    """
     for i in yqinfo:
         if i[16] == 0:
             t = threading.Thread(target=Realdata_dict, args=(i,))
             threads.append(t)
+    """
     for i in threads:
         i.start()
 
