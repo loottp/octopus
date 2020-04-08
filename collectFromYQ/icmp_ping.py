@@ -9,7 +9,16 @@ __date__ = '2018/5/6 15:53'
 
 import socket
 import struct,sys
+import random
+import string
 
+def random_letters(n):
+    s = ''
+    while len(s) < n:
+        a_str = string.ascii_lowercase
+        random_letter = random.choice(a_str)
+        s += random_letter
+    return s.encode('utf-8')
 
 def checksum(packet):
     """
@@ -41,16 +50,17 @@ def checksum(packet):
     return answer
 
 def send_one_ping(rawsocket, dst_addr, icmp_id, icmp_sq):
-
     dst_addr = socket.gethostbyname(dst_addr)
-    packet = struct.pack('!BBHHH32s', 8, 0, 0, icmp_id, icmp_sq, b'abcdefghijklmnopqrstuvwxyzabcdef')
+    randomcode = random_letters(20)
+    packet = struct.pack('!BBHHH32s', 8, 0, 0, icmp_id, icmp_sq, randomcode)
     chksum=checksum(packet)
-    packet = struct.pack('!BBHHH32s', 8, 0, chksum,icmp_id, icmp_sq, b'abcdefghijklmnopqrstuvwxyzabcdef')
+    packet = struct.pack('!BBHHH32s', 8, 0, chksum,icmp_id, icmp_sq, randomcode)
     send_time = time.time()
+    print(packet)
     rawsocket.sendto(packet, (dst_addr, 100))
-    return send_time,dst_addr
+    return send_time,dst_addr, randomcode
 
-def recv_one_ping(rawsocket,icmp_id, icmp_sq ,time_sent,timeout):
+def recv_one_ping(rawsocket,icmp_id, icmp_sq ,time_sent,timeout, randomcode):
     while True:
         started_select = time.time()
         what_ready = select.select([rawsocket], [], [], timeout)
@@ -60,6 +70,7 @@ def recv_one_ping(rawsocket,icmp_id, icmp_sq ,time_sent,timeout):
         time_received = time.time()
         received_packet, addr = rawsocket.recvfrom(1024)
         icmpHeader = received_packet[20:28]
+        print(randomcode, received_packet[28:48])
         type, code, checksum, packet_id, sequence = struct.unpack(
             "!BBHHH", icmpHeader
         )
@@ -80,16 +91,17 @@ def one_ping(dst_addr,icmp_sq,timeout = 2):
 
     icmp_id = os.getpid() & 0xFFFF
 
-    send_time, addr = send_one_ping(rawsocket, dst_addr, icmp_id, icmp_sq)
-    time = recv_one_ping(rawsocket, icmp_id, icmp_sq, send_time, timeout)
-    return time, addr
+    send_time, addr, randomcode = send_one_ping(rawsocket, dst_addr, icmp_id, icmp_sq)
+    time1 = recv_one_ping(rawsocket, icmp_id, icmp_sq, send_time, timeout, randomcode)
+    return time1, addr
 
 
 
 def ping(dst_addr,timeout = 2, count = 4):
     for i in range(0, count):
-        time, addr = one_ping(dst_addr, i+1, timeout)
-        if time >= 0:
+        time1, addr = one_ping(dst_addr, i+1, timeout)
+        print(dst_addr, time1)
+        if time1 >= 0:
             return 0            # 正常返回0
     return 1            # 异常返回1
 
@@ -105,5 +117,6 @@ if __name__=="__main__":
     for i in range(1,255):
         ping('10.35.185.%d'%i, count=1, timeout=2)
         '''
-    d = ping('10.35.185.99', count=4, timeout=2)
+    d = ping('10.35.65.104', count=4, timeout=2)
     print(d)
+

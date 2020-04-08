@@ -50,7 +50,7 @@ class check:
     def checkYQ(self):
         # 检查网络
         file = open('d:/1.txt', 'w+')
-        yqinfo = list(self.c.execute("SELECT INSTRIP,INSTRID,USERNAME,PASSWORD,INSTRPROJECT,INSTRTYPE FROM CAPACITY where instrid='X411DQYQ0144'"))
+        yqinfo = list(self.c.execute("SELECT INSTRIP,INSTRID,USERNAME,PASSWORD,INSTRPROJECT,INSTRTYPE FROM CAPACITY WHERE INSTRID = 'X411DQYQ1546' "))
         print(yqinfo, len(yqinfo))
         o_network = 0
         o_connect = 0
@@ -80,6 +80,7 @@ class check:
                     # 测试登录
                     print("开始测试仪器登录")
                     order = "get /42+{0}+lin+{1}+{2} /http/1.1".format(i[1], i[2], i[3])
+                    order = "get /{0}+{1}+lin+{2}+{3} /http/1.1".format(str(21 + len(i[2]) + len(i[3])),i[1], i[2], i[3])
                     s.sendall(bytes(order, encoding="utf-8"))
 
                     # 测试仪器状态、实时数据、当天数据、五分钟数据
