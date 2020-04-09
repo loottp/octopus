@@ -12,6 +12,7 @@ import struct,sys
 import random
 import string
 
+
 def random_letters(n):
     s = ''
     while len(s) < n:
@@ -56,7 +57,6 @@ def send_one_ping(rawsocket, dst_addr, icmp_id, icmp_sq):
     chksum=checksum(packet)
     packet = struct.pack('!BBHHH32s', 8, 0, chksum,icmp_id, icmp_sq, randomcode)
     send_time = time.time()
-    print(packet)
     rawsocket.sendto(packet, (dst_addr, 100))
     return send_time,dst_addr, randomcode
 
@@ -70,7 +70,6 @@ def recv_one_ping(rawsocket,icmp_id, icmp_sq ,time_sent,timeout, randomcode):
         time_received = time.time()
         received_packet, addr = rawsocket.recvfrom(1024)
         icmpHeader = received_packet[20:28]
-        print(randomcode, received_packet[28:48])
         type, code, checksum, packet_id, sequence = struct.unpack(
             "!BBHHH", icmpHeader
         )
@@ -100,7 +99,6 @@ def one_ping(dst_addr,icmp_sq,timeout = 2):
 def ping(dst_addr,timeout = 2, count = 4):
     for i in range(0, count):
         time1, addr = one_ping(dst_addr, i+1, timeout)
-        print(dst_addr, time1)
         if time1 >= 0:
             return 0            # 正常返回0
     return 1            # 异常返回1

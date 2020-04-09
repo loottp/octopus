@@ -572,8 +572,20 @@ def Status_dict(yqinfo):
         endTime = time.time()
         print("本次用时：", endTime - startTime)
         """
-        time.sleep(300)
+        time.sleep(3600)
 
+def Network(yqinfo):
+    startTime = time.time()
+    for i in yqinfo:
+        print('开始测试%s网络' % i[0])
+        d = ping(i[0].strip(), timeout=2, count=2)
+        if d == 0:
+            statusTab[i[1]]['network'] = 0
+        else:
+            statusTab[i[1]]['network'] = 1
+            print('%s网络异常'%i[0])
+    hua = time.time() - startTime
+    print(hua)
 def Main():
     # 定义变量
     global attributeTab         # 属性字典
@@ -586,7 +598,7 @@ def Main():
 
     conn = sqlite3.connect('../web_oct/yq.db')
     c = conn.cursor()
-    yqinfo = list(c.execute("SELECT * FROM CAPACITY WHERE NETWORK=0 "))
+    yqinfo = list(c.execute("SELECT * FROM CAPACITY  "))
     for i in yqinfo:
         attributeTab[i[1]] = {'instrip': i[0].strip(), 'stationid':i[2], 'pointid':i[3], 'username':i[4], \
                               'password':i[5], 'instrproject':i[6], 'stationname':i[7],'instrname':i[8],\
@@ -595,7 +607,9 @@ def Main():
                               'todaydata':i[17], 'fivedata':i[18]}
         statusTab[i[1]] = {'network': None, 'status': None, 'connection':None, 'login':None, 'importData':None}
         realdataTab[i[1]] = {'lastTime': None, 'length':0, 'data': []}
+    Network(yqinfo)
 
+    """
     # 采集状态、部分五分钟数据
     t = threading.Thread(target=Status_dict, args=(yqinfo,))
     threads.append(t)
@@ -605,13 +619,14 @@ def Main():
         if i[16] == 0:
             t = threading.Thread(target=Realdata_dict, args=(i,))
             threads.append(t)
-
+    
     #采集南平九五数据
     t = threading.Thread(target=JW_np)
     threads.append(t)
-
+    
     for i in threads:
         i.start()
+    """
 
 
 if __name__ == "__main__":
