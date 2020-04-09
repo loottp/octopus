@@ -57,9 +57,7 @@ def process_data(threadName, q):
             data = q.get()
             queueLock.release()
             dc = DataCollection(data)
-            dc.Network()
-            if dc.o_network == 0:
-                statusTab[data[1]]['network'] = 0
+            if statusTab[data[1]]['network'] == 0:
                 dc.Connect()
                 if dc.o_connect == 0:
                     statusTab[data[1]]['connection'] = 0
@@ -266,6 +264,7 @@ class DataCollection:
                                 msg = '采集实时数据时变量tem_reals收到空数据大于300'
                                 self.Warning(msg)
                                 self.Close()
+                                time.sleep(300)
                                 break
 
                         elif len(tem_real)>600:
@@ -273,6 +272,7 @@ class DataCollection:
                             msg = '采集实时数据出现异常,变量tem_reals数据大于600' + tem_real.decode()
                             self.Warning(msg)
                             self.Close()
+                            time.sleep(300)
                             break
 
             except socket.timeout:
@@ -282,6 +282,7 @@ class DataCollection:
                 msg = '采集实时数据超时，发生了阻塞'
                 self.Warning(msg)
                 self.Close()
+                time.sleep(300)
                 break
             except:
                 s = traceback.format_exc()
@@ -290,6 +291,7 @@ class DataCollection:
                 msg = '出现异常,变量tem_real:'+tem_real.decode()
                 self.Warning(msg)
                 self.Close()
+                time.sleep(300)
                 break
 
 
@@ -523,9 +525,7 @@ def Main1():
 def Realdata_dict(yqOne):
     while True:
         dc = DataCollection(yqOne)
-        dc.Network()
-        if dc.o_network == 0:
-
+        if statusTab[yqOne[1]]['network'] == 0:
             dc.Connect()
             if dc.o_connect == 0:
                 statusTab[yqOne[1]]['connection'] = 0
@@ -575,17 +575,17 @@ def Status_dict(yqinfo):
         time.sleep(3600)
 
 def Network(yqinfo):
-    startTime = time.time()
-    for i in yqinfo:
-        print('开始测试%s网络' % i[0])
-        d = ping(i[0].strip(), timeout=2, count=2)
-        if d == 0:
-            statusTab[i[1]]['network'] = 0
-        else:
-            statusTab[i[1]]['network'] = 1
-            print('%s网络异常'%i[0])
-    hua = time.time() - startTime
-    print(hua)
+    while True:
+        for i in yqinfo:
+            #print('开始测试%s网络' % i[0])
+            d = ping(i[0].strip(), timeout=2, count=2)
+            if d == 0:
+                statusTab[i[1]]['network'] = 0
+            else:
+                statusTab[i[1]]['network'] = 1
+                #print('%s网络异常'%i[0])
+        time.sleep(20)
+
 def Main():
     # 定义变量
     global attributeTab         # 属性字典
@@ -598,21 +598,23 @@ def Main():
 
     conn = sqlite3.connect('../web_oct/yq.db')
     c = conn.cursor()
-    yqinfo = list(c.execute("SELECT * FROM CAPACITY  "))
+    yqinfo = list(c.execute("SELECT * FROM CAPACITY WHERE NETWORK=0  "))
     for i in yqinfo:
         attributeTab[i[1]] = {'instrip': i[0].strip(), 'stationid':i[2], 'pointid':i[3], 'username':i[4], \
                               'password':i[5], 'instrproject':i[6], 'stationname':i[7],'instrname':i[8],\
                               'instrtype':i[9], 'samplerate': i[10], 'itemnum':i[11], 'network':i[12],\
                               'connection':i[13], 'login': i[14], 'yqstatus': i[15], 'realdata':i[16],\
                               'todaydata':i[17], 'fivedata':i[18]}
-        statusTab[i[1]] = {'network': None, 'status': None, 'connection':None, 'login':None, 'importData':None}
+        statusTab[i[1]] = {'network': 0, 'status': None, 'connection':None, 'login':None, 'importData':None}
         realdataTab[i[1]] = {'lastTime': None, 'length':0, 'data': []}
-    Network(yqinfo)
 
-    """
+    # PING网络
+    t1 = threading.Thread(target=Network, args=(yqinfo,))
+    threads.append(t1)
+
     # 采集状态、部分五分钟数据
-    t = threading.Thread(target=Status_dict, args=(yqinfo,))
-    threads.append(t)
+    t2 = threading.Thread(target=Status_dict, args=(yqinfo,))
+    threads.append(t2)
 
     #采集实时数据
     for i in yqinfo:
@@ -621,32 +623,15 @@ def Main():
             threads.append(t)
     
     #采集南平九五数据
-    t = threading.Thread(target=JW_np)
-    threads.append(t)
-    
+    t3 = threading.Thread(target=JW_np)
+    threads.append(t3)
+
     for i in threads:
         i.start()
-    """
+
 
 
 if __name__ == "__main__":
-    print('开始')
+    print('开始1')
     Main()
-
-    """
-    yqinfo = list(c.execute("SELECT INSTRIP,INSTRID,USERNAME,PASSWORD,INSTRPROJECT,INSTRTYPE FROM CAPACITY WHERE REALDATA=0"))
-
-    for i in yqinfo:
-        statusTab[i[1]] = {'network': None, 'status': None}
-        realdataTab[i[1]] = {'lastTime':None, 'data':[]}
-    print("开始")
-    """
-    """
-    #Status_dict()
-    for k,v in statusTab.items():
-        if v['status'] is not None:
-            print(v['status'][2])
-        else:
-            print('无')
-    """
     print("结束")
