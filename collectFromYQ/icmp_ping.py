@@ -115,6 +115,6 @@ if __name__=="__main__":
     for i in range(1,255):
         ping('10.35.185.%d'%i, count=1, timeout=2)
         '''
-    d = ping('10.35.65.104', count=4, timeout=2)
+    d = ping('10.35.185.1', count=4, timeout=2)
     print(d)
 

@@ -264,7 +264,7 @@ class DataCollection:
                                 msg = '采集实时数据时变量tem_reals收到空数据大于300'
                                 self.Warning(msg)
                                 self.Close()
-                                time.sleep(300)
+
                                 break
 
                         elif len(tem_real)>600:
@@ -272,7 +272,7 @@ class DataCollection:
                             msg = '采集实时数据出现异常,变量tem_reals数据大于600' + tem_real.decode()
                             self.Warning(msg)
                             self.Close()
-                            time.sleep(300)
+
                             break
 
             except socket.timeout:
@@ -282,7 +282,7 @@ class DataCollection:
                 msg = '采集实时数据超时，发生了阻塞'
                 self.Warning(msg)
                 self.Close()
-                time.sleep(300)
+
                 break
             except:
                 s = traceback.format_exc()
@@ -291,7 +291,7 @@ class DataCollection:
                 msg = '出现异常,变量tem_real:'+tem_real.decode()
                 self.Warning(msg)
                 self.Close()
-                time.sleep(300)
+
                 break
 
 
@@ -500,8 +500,6 @@ def JW_np():
             print('无法采集到数据')
         time.sleep(3593)
 
-
-
 def Main1():
     conn = sqlite3.connect('../web_oct/yq.db')
     c = conn.cursor()
@@ -524,6 +522,7 @@ def Main1():
 
 def Realdata_dict(yqOne):
     while True:
+        print('开始实时数据采集')
         dc = DataCollection(yqOne)
         if statusTab[yqOne[1]]['network'] == 0:
             dc.Connect()
@@ -533,23 +532,8 @@ def Realdata_dict(yqOne):
                 if dc.o_login == 0:
                     statusTab[yqOne[1]]['login'] = 0
                     dc.RealTimeData()
-
-
-def MainYqRealTime(yqinfo):
-    "主函数"
-    print("开始")
-    # 开多进程
-    starttime = time.time()
-    threads = []
-    nloops = range(len(yqinfo))
-    for i in nloops:
-        t = threading.Thread(target=Realdata_dict, args=(yqinfo[i],))
-        threads.append(t)
-    for i in range(len(yqinfo)):
-        threads[i].start()
-    endtime = time.time()
-    huatime =  endtime-starttime
-    print('all Done at:',huatime)
+        print('实时数据采集意外停止，暂停5分钟')
+        time.sleep(300)
 
 def Status_dict(yqinfo):
     threadList = ["Thread-1", "Thread-2", "Thread-3", "Thread-4", "Thread-5", "Thread-6", "Thread-7", "Thread-8", "Thread-9", "Thread-10", "Thread-11", "Thread-12"]
@@ -576,29 +560,54 @@ def Status_dict(yqinfo):
 
 def Network(yqinfo):
     while True:
+        try:
+            for i in yqinfo:
+                #print('开始测试%s网络' % i[0])
+                d = ping(i[0].strip(), timeout=2, count=2)
+                if d == 0:
+                    statusTab[i[1]]['network'] = 0
+                else:
+                    statusTab[i[1]]['network'] = 1
+                    #print('%s网络异常'%i[0])
+            time.sleep(20)
+        except:
+            print("ping")
+
+def Watchdog(yqinfo, si):
+    while True:
+        for i in si:
+            abnormalTab['networks'][i[0]]['abn_instr_nums'] = 0
+            abnormalTab['networks'][i[0]]['stationnetwork'] = 0
+            abnormalTab['networks'][i[0]]['abngateway'] = 0
         for i in yqinfo:
-            #print('开始测试%s网络' % i[0])
-            d = ping(i[0].strip(), timeout=2, count=2)
-            if d == 0:
-                statusTab[i[1]]['network'] = 0
-            else:
-                statusTab[i[1]]['network'] = 1
-                #print('%s网络异常'%i[0])
-        time.sleep(20)
+            # 扫描网络
+            if statusTab[i[1]]['network'] == 1:
+                abnormalTab['networks'][i[2]]['abn_instr_nums'] += 1
+                abnormalTab['networks'][i[2]]['abngateway'] = ping(abnormalTab['networks'][i[2]]['instrgateway'], count=4, timeout=2)
+                if abnormalTab['networks'][i[2]]['abn_instr_nums'] == abnormalTab['networks'][i[2]]['instrnums']:
+                    abnormalTab['networks'][i[2]]['stationnetwork'] = 1
+        time.sleep(60)
+
 
 def Main():
     # 定义变量
     global attributeTab         # 属性字典
     global statusTab            # 状态字典
     global realdataTab          # 实时数据字典
+    global abnormalTab          # 异常字典
     attributeTab = {}
     statusTab = {}
     realdataTab = {}
     threads = []
+    abnormalTab = {'networks':{}, 'yiqi':{}}
 
     conn = sqlite3.connect('../web_oct/yq.db')
     c = conn.cursor()
     yqinfo = list(c.execute("SELECT * FROM CAPACITY WHERE NETWORK=0  "))
+    si = list(c.execute("SELECT * FROM SI"))
+    for i in si:
+        abnormalTab['networks'][i[0]] = {'stationname':i[1], 'instrnums':i[2], 'instrgateway':i[3], 'abn_instr_nums':0, 'abngateway':0, 'stationnetwork':0}
+
     for i in yqinfo:
         attributeTab[i[1]] = {'instrip': i[0].strip(), 'stationid':i[2], 'pointid':i[3], 'username':i[4], \
                               'password':i[5], 'instrproject':i[6], 'stationname':i[7],'instrname':i[8],\
@@ -608,8 +617,9 @@ def Main():
         statusTab[i[1]] = {'network': 0, 'status': None, 'connection':None, 'login':None, 'importData':None}
         realdataTab[i[1]] = {'lastTime': None, 'length':0, 'data': []}
 
+
     # PING网络
-    t1 = threading.Thread(target=Network, args=(yqinfo,))
+    t1 = threading.Thread(target=Network, args=(yqinfo, ))
     threads.append(t1)
 
     # 采集状态、部分五分钟数据
@@ -625,6 +635,10 @@ def Main():
     #采集南平九五数据
     t3 = threading.Thread(target=JW_np)
     threads.append(t3)
+
+    #看门狗
+    t4 = threading.Thread(target=Watchdog, args=(yqinfo, si))
+    threads.append((t4))
 
     for i in threads:
         i.start()
