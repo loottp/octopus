@@ -63,11 +63,14 @@ def process_data(threadName, q):
                     statusTab[data[1]]['connection'] = 0
                     dc.Login()
                     if dc.o_login == 0:
+
                         statusTab[data[1]]['login'] = 0
                         statusTab[data[1]]['status'] = dc.Status()
+
                         if data[16] == 1 and data[17] == 0:
                             dc.FiveData()
                         dc.Close()
+
                     else:
                         statusTab[data[1]]['login'] = 1
                         dc.Close()
@@ -115,6 +118,38 @@ class DataCollection:
             self.o_network = 1
             print('网络异常')
 
+    # 采集工作参数
+    def WorkParameters(self):
+        '采集状态仪器状态信息，通过get /19+id+ste /http/1.1'
+        print("开始采集仪器工作参数", self.info[0:4],self.info[7:10])
+        order = "get /21+{0}+pmr+m /http/1.1".format(self.info[1])
+        # 测试仪器状态
+        self.conInstrument.sendall(bytes(order, encoding="utf-8"))
+        try:
+            tem_parameters = self.conInstrument.recv(200)
+            print(tem_parameters)
+            if b'ack\n' in tem_parameters:
+                self.o_yqstatus = 0
+                print(tem_parameters)
+                dataContent = tem_parameters.decode().split('\n')[1].split(' ')
+                attributeTab[self.info[1]]['working_parameterNum'] = int(dataContent[3])
+                attributeTab[self.info[1]]['working_parameter'] = dataContent[4:]
+
+            elif tem_parameters == b'$nak\n':
+                self.o_yqstatus = 1
+                return None
+            elif tem_parameters == b'$err\n':
+                self.o_yqstatus = 2
+                return None
+            else:
+                self.o_yqstatus = 4
+                return None
+        except socket.timeout:
+            self.o_yqstatus = 3
+            return None
+        except:
+            self.o_yqstatus = 3
+            return None
 
     # 连接仪器
     def Connect(self):
@@ -185,6 +220,7 @@ class DataCollection:
         self.conInstrument.sendall(bytes(order, encoding="utf-8"))
         try:
             tem_status = self.conInstrument.recv(100)
+            print(tem_status)
             if b'ack\n' in tem_status:
                 self.o_yqstatus = 0
                 return self.Conversion_status(tem_status.decode())
@@ -311,7 +347,8 @@ class DataCollection:
             tem_real = self.conInstrument.recv(300)
             if b'ack\n' in tem_real:
                 self.o_realdata = 0
-                print(tem_real)
+                self.StopData()
+                return tem_real.decode()
 
                 # 停止实时数据
                 #self.StopData()
@@ -337,16 +374,22 @@ class DataCollection:
             tem_fivedata = self.conInstrument.recv(500)
             if b'ack\n' in tem_fivedata:
                 self.o_fivedata = 0
-                print(tem_fivedata)
+                return tem_fivedata.decode()
 
             elif tem_fivedata == '$nak\n':
                 self.o_fivedata = 1
+                return None
             elif tem_fivedata == '$err\n':
                 self.o_fivedata = 2
+                return None
             else:
                 self.o_fivedata = 4
+                return None
         except socket.timeout:
             self.o_fivedata = 3
+            return None
+        except:
+            return None
 
     # 采集5分钟数据
     def FiveData(self):
@@ -532,7 +575,7 @@ def Realdata_dict(yqOne):
                 if dc.o_login == 0:
                     statusTab[yqOne[1]]['login'] = 0
                     dc.RealTimeData()
-        print('实时数据采集意外停止，暂停5分钟')
+        print('实时数据采集无网络或，意外停止，暂停5分钟')
         time.sleep(300)
 
 def Status_dict(yqinfo):
@@ -586,6 +629,14 @@ def Watchdog(yqinfo, si):
                 abnormalTab['networks'][i[2]]['abngateway'] = ping(abnormalTab['networks'][i[2]]['instrgateway'], count=4, timeout=2)
                 if abnormalTab['networks'][i[2]]['abn_instr_nums'] == abnormalTab['networks'][i[2]]['instrnums']:
                     abnormalTab['networks'][i[2]]['stationnetwork'] = 1
+
+        # 扫描当前值有无超量程
+        for i in yqinfo:
+            if attributeTab[i[1]]['lowervalue'] is not None:
+                lowervalue = float(attributeTab[i[1]]['lowervalue'])
+                data = realdataTab[i[1]]['data'][0][1]
+                for i in data:
+                    if
         time.sleep(60)
 
 
@@ -613,7 +664,9 @@ def Main():
                               'password':i[5], 'instrproject':i[6], 'stationname':i[7],'instrname':i[8],\
                               'instrtype':i[9], 'samplerate': i[10], 'itemnum':i[11], 'network':i[12],\
                               'connection':i[13], 'login': i[14], 'yqstatus': i[15], 'realdata':i[16],\
-                              'todaydata':i[17], 'fivedata':i[18]}
+                              'todaydata':i[17], 'fivedata':i[18], 'working_parameterNum':i[20], \
+                              'working_parameter':i[21], 'working_parameter_kg':i[23], 'mainitems':i[24], \
+                              'lowervalue':i[25], 'highvalue':i[26]}
         statusTab[i[1]] = {'network': 0, 'status': None, 'connection':None, 'login':None, 'importData':None}
         realdataTab[i[1]] = {'lastTime': None, 'length':0, 'data': []}
 
@@ -631,11 +684,11 @@ def Main():
         if i[16] == 0:
             t = threading.Thread(target=Realdata_dict, args=(i,))
             threads.append(t)
-    
+    """
     #采集南平九五数据
     t3 = threading.Thread(target=JW_np)
     threads.append(t3)
-
+    """
     #看门狗
     t4 = threading.Thread(target=Watchdog, args=(yqinfo, si))
     threads.append((t4))
