@@ -618,26 +618,44 @@ def Network(yqinfo):
 
 def Watchdog(yqinfo, si):
     while True:
-        for i in si:
-            abnormalTab['networks'][i[0]]['abn_instr_nums'] = 0
-            abnormalTab['networks'][i[0]]['stationnetwork'] = 0
-            abnormalTab['networks'][i[0]]['abngateway'] = 0
-        for i in yqinfo:
-            # 扫描网络
-            if statusTab[i[1]]['network'] == 1:
-                abnormalTab['networks'][i[2]]['abn_instr_nums'] += 1
-                abnormalTab['networks'][i[2]]['abngateway'] = ping(abnormalTab['networks'][i[2]]['instrgateway'], count=4, timeout=2)
-                if abnormalTab['networks'][i[2]]['abn_instr_nums'] == abnormalTab['networks'][i[2]]['instrnums']:
-                    abnormalTab['networks'][i[2]]['stationnetwork'] = 1
+        try:
+            for i in si:
+                abnormalTab['networks'][i[0]]['abn_instr_nums'] = 0
+                abnormalTab['networks'][i[0]]['stationnetwork'] = 0
+                abnormalTab['networks'][i[0]]['abngateway'] = 0
+            for i in yqinfo:
+                # 扫描网络
+                if statusTab[i[1]]['network'] == 1:
+                    abnormalTab['networks'][i[2]]['abn_instr_nums'] += 1
+                    abnormalTab['networks'][i[2]]['abngateway'] = ping(abnormalTab['networks'][i[2]]['instrgateway'], count=4, timeout=2)
+                    if abnormalTab['networks'][i[2]]['abn_instr_nums'] == abnormalTab['networks'][i[2]]['instrnums']:
+                        abnormalTab['networks'][i[2]]['stationnetwork'] = 1
 
-        # 扫描当前值有无超量程
-        for i in yqinfo:
-            if attributeTab[i[1]]['lowervalue'] is not None:
-                lowervalue = float(attributeTab[i[1]]['lowervalue'])
-                data = realdataTab[i[1]]['data'][0][1]
-                for i in data:
-                    if
-        time.sleep(60)
+            # 扫描当前值有无超量程
+            for i in yqinfo:
+                if attributeTab[i[1]]['working_parameter_kg'] == 0:
+                    a = attributeTab[i[1]]['threshold']
+                    #a = "-200 200 -200 200 -200 200 NULL NULL"
+                    b = attributeTab[i[1]]['items']
+                    c = attributeTab[i[1]]['working_parameter'].split(' ')
+                    data = realdataTab[i[1]]['data'][0][1]
+                    for i in range(len(data)):
+                        data1 = (float(data[i]) - float(c[2*i+1])) / float(c[2*i])
+                        print(data1)
+                        if a.split(' ')[2 * i] != 'NULL':
+                            if data1 < float(a.split(' ')[2 * i]):
+                                print(b.split(' ')[i], "  低于下限data:",data1,  a.split(' ')[2 * i])
+                                abnormalTab['yiqi'][i[1]]['overrange'].append( [int(time.time()), b.split(' ')[i]])
+                        if a.split(' ')[2 * i + 1] != 'NULL':
+                            if data1 > float(a.split(' ')[2 * i + 1]):
+                                print(b.split(' ')[i], "  高于上限data:",data1,  a.split(' ')[2 * i + 1])
+                                abnormalTab['yiqi'][i[1]]['overrange'].append([int(time.time()), b.split(' ')[i]])
+        except:
+            print('发生异常')
+            time.sleep(10)
+            continue
+        else:
+            time.sleep(60)
 
 
 def Main():
@@ -654,7 +672,7 @@ def Main():
 
     conn = sqlite3.connect('../web_oct/yq.db')
     c = conn.cursor()
-    yqinfo = list(c.execute("SELECT * FROM CAPACITY WHERE NETWORK=0  "))
+    yqinfo = list(c.execute("SELECT * FROM CAPACITY WHERE instrid = '231XWHYQ0685'  "))
     si = list(c.execute("SELECT * FROM SI"))
     for i in si:
         abnormalTab['networks'][i[0]] = {'stationname':i[1], 'instrnums':i[2], 'instrgateway':i[3], 'abn_instr_nums':0, 'abngateway':0, 'stationnetwork':0}
@@ -665,10 +683,11 @@ def Main():
                               'instrtype':i[9], 'samplerate': i[10], 'itemnum':i[11], 'network':i[12],\
                               'connection':i[13], 'login': i[14], 'yqstatus': i[15], 'realdata':i[16],\
                               'todaydata':i[17], 'fivedata':i[18], 'working_parameterNum':i[20], \
-                              'working_parameter':i[21], 'working_parameter_kg':i[23], 'mainitems':i[24], \
-                              'lowervalue':i[25], 'highvalue':i[26]}
+                              'working_parameter':i[21], 'items':i[22], 'working_parameter_kg':i[23], 'mainitems':i[24], \
+                              'threshold':i[25]}
         statusTab[i[1]] = {'network': 0, 'status': None, 'connection':None, 'login':None, 'importData':None}
         realdataTab[i[1]] = {'lastTime': None, 'length':0, 'data': []}
+        abnormalTab['yiqi'][i[1]] = {'overrange':[]}
 
 
     # PING网络
