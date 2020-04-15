@@ -60,3 +60,4 @@ if __name__ == "__main__":
     for i in threads:
         i.start()
     print("结束")
+    pass
