@@ -36,60 +36,70 @@ import queue
 import threading
 import requests
 
-
-exitFlag = 0
-
 class myThread (threading.Thread):
-    def __init__(self, threadID, name, q):
+    def __init__(self, q):
         threading.Thread.__init__(self)
-        self.threadID = threadID
-        self.name = name
         self.q = q
     def run(self):
-        print ("开启线程：" + self.name)
-        process_data(self.name, self.q)
-        print ("退出线程：" + self.name)
+        print('线程启动')
+        process_data(self.q)
 
-def process_data(threadName, q):
+def process_data(q):
     while True:
-        queueLock.acquire()
-        if not workQueue.empty():
-            data = q.get()
-            queueLock.release()
-            dc = DataCollection(data)
-            if statusTab[data[1]]['network'] == 0:
-                dc.Connect()
-                if dc.o_connect == 0:
-                    statusTab[data[1]]['connection'] = 0
-                    dc.Login()
-                    if dc.o_login == 0:
+        try:
+            queueLock.acquire()
+            if not workQueue.empty():
+                info = q.get()
+                queueLock.release()
+                dc = DataCollection(info)
+                if statusTab[info[1]]['network'] == 0:
+                    dc.Connect()
+                    if dc.o_connect == 0:
+                        statusTab[info[1]]['connection'] = 0
+                        dc.Login()
+                        if dc.o_login == 0:
 
-                        statusTab[data[1]]['login'] = 0
-                        statusTab[data[1]]['status'] = dc.Status()
+                            statusTab[info[1]]['login'] = 0
+                            onedata = dc.Status()
+                            statusTab[info[1]]['status'] = conversion_status(onedata)
+                            if info[16] == 1 and info[18] == 0:
+                                onedata = dc.FiveData()
+                                print(onedata)
+                                onedata1 = conversion_fivedata(info, onedata)
+                                realdataImport(info[1], onedata1)
+                            dc.Close()
 
-                        if data[16] == 1 and data[17] == 0:
-                            dc.FiveData()
-                        dc.Close()
-
+                        else:
+                            statusTab[info[1]]['login'] = 1
+                            dc.Close()
                     else:
-                        statusTab[data[1]]['login'] = 1
+                        statusTab[info[1]]['connection'] = 1
                         dc.Close()
                 else:
-                    statusTab[data[1]]['connection'] = 1
+                    statusTab[info[1]]['network'] = 1
                     dc.Close()
             else:
-                statusTab[data[1]]['network'] = 1
-                dc.Close()
-        else:
-            queueLock.release()
-        time.sleep(1)
+                queueLock.release()
+            time.sleep(1)
+        except:
+            print('process_data发生异常')
+            time.sleep(1)
+
+
 workQueue = queue.Queue(100)
 queueLock = threading.Lock()
 
 
-lock = threading.Lock()
+# lock = threading.Lock()
 LOG_FORMAT = "%(asctime)s - %(levelname)s - %(threadName)s - %(thread)d - %(message)s"
 logging.basicConfig(filename='log.log', format=LOG_FORMAT)
+
+# 字典
+attributeTab = {}       # 属性字典
+statusTab = {}          # 状态字典
+realdataTab = {}        # 实时数据字典
+threads = []
+abnormalTab = {'networks':{}, 'yiqi':{}}        # 异常字典
 
 class DataCollection:
     '数据采集、信息采集'
@@ -99,7 +109,6 @@ class DataCollection:
         self.info = info
         self.conInstrument = socket.socket(socket.AF_INET, socket.SOCK_STREAM)  # 套接字对象，通过socket
         self.conInstrument.settimeout(10)
-        self.o_network = 0
         self.o_connect = 0
         self.o_login = 0
         self.o_yqstatus = 0
@@ -107,16 +116,6 @@ class DataCollection:
         self.o_todaydata = 0
         self.o_fivedata = 0
         self.o_stop = 0
-
-    def Network(self):
-        print('开始测试%s网络' % self.info[0])
-        d = ping(self.info[0].strip(), timeout=2, count=2)
-        print('IP:%s,d的值为%d'%(self.info[0], d))
-        if d == 0:
-            self.o_network = 0
-        else:
-            self.o_network = 1
-            print('网络异常')
 
     # 采集工作参数
     def WorkParameters(self):
@@ -196,21 +195,6 @@ class DataCollection:
             self.Warning(msg)
             self.Close()
 
-    #判断接收的数据是否正常
-    def Conversion_status(self, oneData):
-        try:
-            data = oneData.split('\n')[1].split(' ')
-            shijiLength = len(data)
-            print(shijiLength)
-            if shijiLength >= 10:
-                diffTime = round(time.time()-time.mktime(time.strptime(data[1],"%Y%m%d%H%M%S")))
-                return ( time.strftime("%Y%m%d%H%M%S", time.localtime()),  data[1], diffTime, data[2], data[4], data[5], data[8], data[9])
-            else:
-                diffTime = round(time.time() - time.mktime(time.strptime(data[1], "%Y%m%d%H%M%S")))
-                return  ( time.strftime("%Y%m%d%H%M%S", time.localtime()),  data[1], diffTime, data[2], data[4], data[5], None, None)
-        except:
-            print("状态数据出错", oneData)
-
     # 采集状态信息, 36 20191222214137 2 0 0 0 0 0 0 0 00 取1,2,4,5,8,9
     def Status(self):
         '采集状态仪器状态信息，通过get /19+id+ste /http/1.1'
@@ -220,10 +204,10 @@ class DataCollection:
         self.conInstrument.sendall(bytes(order, encoding="utf-8"))
         try:
             tem_status = self.conInstrument.recv(100)
-            print(tem_status)
+            #print(tem_status)
             if b'ack\n' in tem_status:
                 self.o_yqstatus = 0
-                return self.Conversion_status(tem_status.decode())
+                return tem_status.decode()
             elif tem_status == b'$nak\n':
                 self.o_yqstatus = 1
                 return None
@@ -239,7 +223,6 @@ class DataCollection:
         except:
             self.o_yqstatus = 3
             return None
-
 
     # 实时数据导入到字典中
     def RealdataImport(self, data):
@@ -271,8 +254,8 @@ class DataCollection:
                     statusTab[self.info[1]]['importData'] = 0
                     self.o_realdata = 0
                     dataContent = content_ack.group().decode().split('\n')[1].split(' ')  # 数据包的主内容
-                    dataTime = dataContent[1]
-                    data = [dataTime,dataContent[-itemnum:]]
+                    dataTime = int(time.time())
+                    data = [dataTime, dataContent[-itemnum:]]
                     #lock.acquire()
                     # 把数据导入到字典中
                     self.RealdataImport(data)
@@ -330,13 +313,10 @@ class DataCollection:
 
                 break
 
-
-
     # 输出报警信息并关闭套接字
     def Warning(self, msg):
         message = self.info[0] + self.info[1] + self.info[2] + self.info[3] + self.info[7] + msg
         logging.warning(message)
-
 
     # 实时采集数据（一个）
     def RealTimeOneData(self):
@@ -364,10 +344,11 @@ class DataCollection:
         except socket.timeout:
             self.o_realdata = 3
 
-    # 采集5分钟数据,实验用
-    def FiveData_1(self):
+    # 采集5分钟数据
+    def FiveData(self):
         '采集状态仪器状态信息，通过get /19+id+ste /http/1.1'
         print("开始测试仪器五分钟数据")
+
         order = "get /21+{0}+dat+5 /http/1.1".format(self.info[1])
         self.conInstrument.sendall(bytes(order, encoding="utf-8"))
         try:
@@ -376,43 +357,8 @@ class DataCollection:
                 self.o_fivedata = 0
                 return tem_fivedata.decode()
 
-            elif tem_fivedata == '$nak\n':
-                self.o_fivedata = 1
-                return None
-            elif tem_fivedata == '$err\n':
-                self.o_fivedata = 2
-                return None
-            else:
-                self.o_fivedata = 4
-                return None
-        except socket.timeout:
-            self.o_fivedata = 3
-            return None
-        except:
-            return None
-
-    # 采集5分钟数据
-    def FiveData(self):
-        '采集状态仪器状态信息，通过get /19+id+ste /http/1.1'
-        print("开始测试仪器五分钟数据")
-        itemnum = attributeTab[self.info[1]]['itemnum']
-        order = "get /21+{0}+dat+5 /http/1.1".format(self.info[1])
-        self.conInstrument.sendall(bytes(order, encoding="utf-8"))
-        try:
-            tem_fivedata = self.conInstrument.recv(500)
-            if b'ack\n' in tem_fivedata:
-                self.o_fivedata = 0
-                dataContent = tem_fivedata.decode().split('\n')[1].split(' ')  # 数据包的主内容
-                dataTime = dataContent[1]
-                data = [dataTime, dataContent[-itemnum-1:-1]]
-
-                # 把数据导入到字典中，使用内部函数
-                self.RealdataImport(data)
-
-
             elif tem_fivedata == b'$nak\n':
                 self.o_fivedata = 1
-
                 # 报警
                 msg = '变量tem_fivedata收到数据nak'
                 self.Warning(msg)
@@ -470,9 +416,7 @@ class DataCollection:
             self.Warning(msg)
             self.Close()
 
-
-
-    #关闭套接字
+    # 关闭套接字
     def Close(self):
         self.conInstrument.close()
 
@@ -490,9 +434,8 @@ class DataCollection:
                 tem_todaydata.append(data)
                 tem1 = b''.join(tem_todaydata)
                 if b'ack\n' in tem1:
-                    print(tem1)
                     self.o_todaydata = 0
-                    break
+                    return tem1.decode()
                 elif tem1 == '$nak\n':
                     self.o_todaydata = 1
                 elif tem1 == '$err\n':
@@ -504,65 +447,105 @@ class DataCollection:
                 self.o_todaydata = 3
                 break
 
+
+# 五分钟数据导入到实时数据字典中
+def realdataImport(id, data):
+    # 描述： 把实时数据导入到realdataTab字典中
+    #
+    # 输入：仪器信息， 实时数据包（从conversion_realdata函数中返回
+    #
+    # 输出：把数据直接导入到字典中
+    #
+    realdataTab[id]['data'].insert(0, data)
+    realdataTab[id]['length'] = realdataTab[id]['length'] + 1
+    if realdataTab[id]['length'] > 5:
+        realdataTab[id]['data'].pop()
+        realdataTab[id]['length'] = realdataTab[id]['length'] - 1
+
+# 清洗五分钟数据包
+def conversion_fivedata(info, onedata):
+    # 描述： 对fivedata数据包进行清洗转换
+    #
+    # 输入：info（仪器信息），onedata（五分钟数据包）
+    #
+    # 输出：[数据包时间， [data1, data2, ....] ]
+    #       其中data8，data9如果没有，输出为None
+    itemnum = attributeTab[info[1]]['itemnum']
+    dataContent = onedata.split('\n')[1].split(' ')  # 数据包的主内容
+    dataTime = int(time.time())
+    return [dataTime, dataContent[-itemnum-1:-1]]
+
+
+# 清洗转换status数据包
+def conversion_status(onedata):
+    # 描述： 对status数据包进行清洗转换
+    #
+    # 输入：'$36\n36 20200414085126 2 0 0 0 0 0 0 0 00\nack\n'
+    #
+    # 输出：[本地时间，数据包时间， 钟差， data2，data4， data5， data8， data9 ]
+    #       其中data8，data9如果没有，输出为None
+    try:
+        data = onedata.split('\n')[1].split(' ')
+        shijiLength = len(data)
+        #print(shijiLength)
+        if shijiLength >= 10:
+            diffTime = round(time.time()-time.mktime(time.strptime(data[1],"%Y%m%d%H%M%S")))
+            return [time.strftime("%Y%m%d%H%M%S", time.localtime()),  data[1], diffTime, data[2], data[4], data[5], data[8], data[9]]
+        else:
+            diffTime = round(time.time() - time.mktime(time.strptime(data[1], "%Y%m%d%H%M%S")))
+            return [time.strftime("%Y%m%d%H%M%S", time.localtime()),  data[1], diffTime, data[2], data[4], data[5], None, None]
+    except:
+        print("状态数据出错", onedata)
+
 #九五数据转换
 def Conversion_JW_np(data):
+    # 描述： 把采集于网页的数据进行转换
+    #
+    # 输入：单个数据，如'A012345'等字符串
+    #
+    # 输出：单个数据，转换成'-1234.5'
+    #
     try:
         if data == 'AAAAAA':
-            return None
+            return 'NULL'
         elif data[0] == 'A':
             return str(-float(data[1:])/10)
         elif data[0] == '2':
             return str(float(data[1:])/10)
         else:
-            return None
+            return 'NULL'
     except:
         print('无法转换')
-        return None
+        return 'NULL'
 
 # 采集南平台九五
 def JW_np():
+    # 描述： 专用采集南平台协转，有两套仪器，VS垂直摆和硐温仪，3个分量
+    #
+    # 输入：无
+    #
+    # 输出：无，直接导入到字典中，
+    #
+    # vs垂直摆[数据包时间， [data1, data2] ]，硐温仪[数据包时间， [data1] ]
+    #
     while True:
         c = requests.get('http://10.35.185.111/recvcurrent1').content.decode()
         data = re.findall(r"\'(.*?)\'", c)
         if len(data) == 3:
-            data = list(map(Conversion_JW_np, data))
+            data1 = list(map(Conversion_JW_np, data))
             # 垂直摆倾斜仪数据
-            realdataTab['J222DQYQ9548']['data'].insert(0, data[0:2])
-            realdataTab['J222DQYQ9548']['length'] = realdataTab['J222DQYQ9548']['length'] + 1
-            if realdataTab['J222DQYQ9548']['length'] > 5:
-                realdataTab['J222DQYQ9548']['data'].pop()
-                realdataTab['J222DQYQ9548']['length'] = realdataTab['J222DQYQ9548']['length'] - 1
+            realdataImport('J222DQYQ9548', [int(time.time()), data1[0:2]])
 
-            # 硐温仪数据
-            realdataTab['J231DQYQ9548']['data'].insert(0, str(float(data[2])/10))
-            realdataTab['J231DQYQ9548']['length'] = realdataTab['J231DQYQ9548']['length'] + 1
-            if realdataTab['J231DQYQ9548']['length'] > 5:
-                realdataTab['J231DQYQ9548']['data'].pop()
-                realdataTab['J231DQYQ9548']['length'] = realdataTab['J231DQYQ9548']['length'] - 1
+            # 硐温仪数据, 转换的数据缺少0.1倍数。
+            if data1[2] != 'NULL':
+                realdataImport('J231DQYQ9548', [int(time.time()), [str(float(data1[2])/10)]])
+            else:
+                realdataImport('J231DQYQ9548', [int(time.time()), [data1[2]]])
         else:
             print('无法采集到数据')
         time.sleep(3593)
 
-def Main1():
-    conn = sqlite3.connect('../web_oct/yq.db')
-    c = conn.cursor()
-    yqinfo = list(c.execute("SELECT INSTRIP,INSTRID,USERNAME,PASSWORD,INSTRPROJECT,INSTRTYPE FROM CAPACITY "))
-    for i in yqinfo:
-        dc = DataCollection(i)
-        dc.Network()
-        if dc.o_network == 0:
-            dc.Connect()
-            if dc.o_connect == 0:
-                dc.Login()
-                if dc.o_login == 0:
-                    #dc.Status()
-                    dc.FiveData()
-                    #dc.TodayData()
-                    #dc.RealTimeOneData()
-
-                    print(dc.o_realdata)
-
-
+#
 def Realdata_dict(yqOne):
     while True:
         print('开始实时数据采集')
@@ -579,14 +562,26 @@ def Realdata_dict(yqOne):
         time.sleep(300)
 
 def Status_dict(yqinfo):
-    threadList = ["Thread-1", "Thread-2", "Thread-3", "Thread-4", "Thread-5", "Thread-6", "Thread-7", "Thread-8", "Thread-9", "Thread-10", "Thread-11", "Thread-12"]
-    threadID = 1
+    # 描述： 开多个线程，用于采集status数据包、部分五分钟数据采集
+    #       多个线程共用一个队列，从队列中取数
+    # 输入：yqinfo（所有的仪器信息）
+    #
+    # 输出：无
+    #
+
+    # 线程数由yqinfo数量决定，最多10个线程。
+    if len(yqinfo) > 10:
+        threads_num = 10
+    else:
+        threads_num = len(yqinfo)
+
+    # threads1为线程列表
     threads1 = []
-    for tName in threadList:
-        thread = myThread(threadID, tName, workQueue)
+    for i in range(threads_num):
+        thread = myThread(workQueue)
         thread.start()
         threads1.append(thread)
-        threadID += 1
+
     while True:
         queueLock.acquire()
         for i in yqinfo:
@@ -602,21 +597,31 @@ def Status_dict(yqinfo):
         time.sleep(3600)
 
 def Network(yqinfo):
+    # 描述： 采集网络连通性
+    #
+    # 输入：yqinfo（所有的仪器信息）
+    #
+    # 输出：无，数据直接存入到statusTab字典中
+    #
     while True:
-        try:
-            for i in yqinfo:
-                #print('开始测试%s网络' % i[0])
+        for i in yqinfo:
+            try:
                 d = ping(i[0].strip(), timeout=2, count=2)
                 if d == 0:
                     statusTab[i[1]]['network'] = 0
                 else:
                     statusTab[i[1]]['network'] = 1
-                    #print('%s网络异常'%i[0])
-            time.sleep(20)
-        except:
-            print("ping")
+            except:
+                print("ping中出现异常", i)
+        time.sleep(20)
 
 def Watchdog(yqinfo, si):
+    # 描述： 监控statusTab、realdataTab
+    #
+    # 输入：yqinfo（所有的仪器信息）
+    #
+    # 输出：无，数据直接存入到statusTab字典中
+    #
     while True:
         try:
             for i in si:
@@ -658,66 +663,7 @@ def Watchdog(yqinfo, si):
             time.sleep(60)
 
 
-def Main():
-    # 定义变量
-    global attributeTab         # 属性字典
-    global statusTab            # 状态字典
-    global realdataTab          # 实时数据字典
-    global abnormalTab          # 异常字典
-    attributeTab = {}
-    statusTab = {}
-    realdataTab = {}
-    threads = []
-    abnormalTab = {'networks':{}, 'yiqi':{}}
-
-    conn = sqlite3.connect('../web_oct/yq.db')
-    c = conn.cursor()
-    yqinfo = list(c.execute("SELECT * FROM CAPACITY WHERE instrid = '231XWHYQ0685'  "))
-    si = list(c.execute("SELECT * FROM SI"))
-    for i in si:
-        abnormalTab['networks'][i[0]] = {'stationname':i[1], 'instrnums':i[2], 'instrgateway':i[3], 'abn_instr_nums':0, 'abngateway':0, 'stationnetwork':0}
-
-    for i in yqinfo:
-        attributeTab[i[1]] = {'instrip': i[0].strip(), 'stationid':i[2], 'pointid':i[3], 'username':i[4], \
-                              'password':i[5], 'instrproject':i[6], 'stationname':i[7],'instrname':i[8],\
-                              'instrtype':i[9], 'samplerate': i[10], 'itemnum':i[11], 'network':i[12],\
-                              'connection':i[13], 'login': i[14], 'yqstatus': i[15], 'realdata':i[16],\
-                              'todaydata':i[17], 'fivedata':i[18], 'working_parameterNum':i[20], \
-                              'working_parameter':i[21], 'items':i[22], 'working_parameter_kg':i[23], 'mainitems':i[24], \
-                              'threshold':i[25]}
-        statusTab[i[1]] = {'network': 0, 'status': None, 'connection':None, 'login':None, 'importData':None}
-        realdataTab[i[1]] = {'lastTime': None, 'length':0, 'data': []}
-        abnormalTab['yiqi'][i[1]] = {'overrange':[]}
-
-
-    # PING网络
-    t1 = threading.Thread(target=Network, args=(yqinfo, ))
-    threads.append(t1)
-
-    # 采集状态、部分五分钟数据
-    t2 = threading.Thread(target=Status_dict, args=(yqinfo,))
-    threads.append(t2)
-
-    #采集实时数据
-    for i in yqinfo:
-        if i[16] == 0:
-            t = threading.Thread(target=Realdata_dict, args=(i,))
-            threads.append(t)
-    """
-    #采集南平九五数据
-    t3 = threading.Thread(target=JW_np)
-    threads.append(t3)
-    """
-    #看门狗
-    t4 = threading.Thread(target=Watchdog, args=(yqinfo, si))
-    threads.append((t4))
-
-    for i in threads:
-        i.start()
-
-
-
 if __name__ == "__main__":
     print('开始1')
-    Main()
+    #Main()
     print("结束")
