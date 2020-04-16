@@ -19,12 +19,7 @@
 
 import socket
 from icmp_ping import *
-import sqlite3
 import time
-import matplotlib.pyplot as plt
-import numpy as np
-import io
-from DB.database import Database
 import re
 
 
@@ -105,7 +100,7 @@ class DataCollection:
     '数据采集、信息采集'
 
     # info为仪器状态信息列表，info=[ip,id,username,password,instrproject,instrtype]
-    def __init__(self, info):
+    def __init__(self, info, bq):
         self.info = info
         self.conInstrument = socket.socket(socket.AF_INET, socket.SOCK_STREAM)  # 套接字对象，通过socket
         self.conInstrument.settimeout(10)
@@ -116,6 +111,7 @@ class DataCollection:
         self.o_todaydata = 0
         self.o_fivedata = 0
         self.o_stop = 0
+        self.bq = bq
 
     # 采集工作参数
     def WorkParameters(self):
@@ -151,7 +147,7 @@ class DataCollection:
             return None
 
     # 连接仪器
-    def Connect(self):
+    def Connect(self, bq):
         '''
         正常：$ack\n   不正常：$nak\n  仪器收到错误指令：$err\n $err\r\n
         '''
@@ -160,6 +156,8 @@ class DataCollection:
             self.conInstrument.connect((self.info[0].strip(), 81))
             self.o_connect = 0
         except socket.timeout:
+            c_time = int(time.time())
+            bq.put([0, 1, self.info[1], c_time, 'real+1'])
             print('无法连接')
             self.o_connect = 1
         except TimeoutError:
@@ -224,125 +222,82 @@ class DataCollection:
             self.o_yqstatus = 3
             return None
 
-    # 实时数据导入到字典中
-    def RealdataImport(self, data):
-        realdataTab[self.info[1]]['data'].insert(0, data)
-        realdataTab[self.info[1]]['length'] = realdataTab[self.info[1]]['length'] + 1
-        if realdataTab[self.info[1]]['length'] > 5:
-            realdataTab[self.info[1]]['data'].pop()
-            realdataTab[self.info[1]]['length'] = realdataTab[self.info[1]]['length'] - 1
-
     # 实时采集数据
-    def RealTimeData(self):
+    def RealTimeData(self, bq):
         self.conInstrument.settimeout(100)
         print(threading.currentThread().ident)
         print("开始测试仪器实时数据")
         order = "get /21+{0}+dat+0 /http/1.1".format(self.info[1])
         self.conInstrument.sendall(bytes(order, encoding="utf-8"))
-        itemnum = attributeTab[self.info[1]]['itemnum']
-        print(itemnum)
-        noneLength = 0
         tem_real = b''
+        noneLength = 0
         while True:
             try:
                 tem_real += self.conInstrument.recv(300)
-                content_ack = re.match(b'\$(.*?)ack\n', tem_real, re.DOTALL)
-
+                content_ack = re.match(b'\$(.*?)ack\n', tem_real, re.DOTALL)  # 加re.DOTALL代表匹配所有字符包括\n
+                c_time = int(time.time())
                 if content_ack is not None:
-                    tem_real = tem_real[content_ack.span()[1]:]
-                    noneLength = 0
-                    statusTab[self.info[1]]['importData'] = 0
+                    tem_real = tem_real[content_ack.span()[1]:]  # 把剩下的还给tem_real
+                    datatem = content_ack.group().decode().split('\n')[1].split(' ')
+                    itemnum = int(datatem[5])
+                    data = datatem[-itemnum:]
+                    bq.put([0, 0, self.info[1], c_time, data])
                     self.o_realdata = 0
-                    dataContent = content_ack.group().decode().split('\n')[1].split(' ')  # 数据包的主内容
-                    dataTime = int(time.time())
-                    data = [dataTime, dataContent[-itemnum:]]
-                    #lock.acquire()
-                    # 把数据导入到字典中
-                    self.RealdataImport(data)
-                    #lock.release()
+                    noneLength = 0
                 else:
                     content_nak = re.match(b'\$nak\n', tem_real, re.DOTALL)
                     if content_nak is not None:
-                        print(tem_real)
-                        tem_real = tem_real[content_nak.span()[1]:]
-                        self.o_realdata = 1
-                        statusTab[self.info[1]]['importData'] = 1
+                        bq.put([0, 1, self.info[1], c_time, 'real+1'])
+                        msg = '实时数据收到nak'
+                        Warning(self.info, msg)
+                        self.Close()
+                        break
                     else:
                         content_err = re.match(b'\$err\n', tem_real, re.DOTALL)
                         if content_err is not None:
-                            print(tem_real)
-                            tem_real = tem_real[content_err.span()[1]:]
-                            self.o_realdata = 2
-                            statusTab[self.info[1]]['importData'] = 1
+                            bq.put([0, 1, self.info[1], c_time, 'real+2'])
+                            msg = '实时数据收到err'
+                            Warning(self.info, msg)
+                            self.Close()
 
                         elif tem_real == b'':
                             noneLength += 1
                             if noneLength > 100:
-                                statusTab[self.info[1]]['importData'] = 1
+                                bq.put([0, 1, self.info[1], c_time, 'real+4'])
                                 # 报警
-                                msg = '采集实时数据时变量tem_reals收到空数据大于300'
-                                self.Warning(msg)
+                                msg = '采集实时数据时变量tem_reals收到空数据大于300，仪器端已经断开'
+                                Warning(self.info, msg)
                                 self.Close()
-
                                 break
 
-                        elif len(tem_real)>600:
+                        elif len(tem_real) > 600:
+                            bq.put([0, 1, self.info[1], c_time, 'real+5'])
                             # 报警
                             msg = '采集实时数据出现异常,变量tem_reals数据大于600' + tem_real.decode()
-                            self.Warning(msg)
+                            Warning(self.info, msg)
                             self.Close()
 
                             break
 
             except socket.timeout:
-                self.o_realdata = 3
-                statusTab[self.info[1]]['importData'] = 1
+                c_time = int(time.time())
+                bq.put([0, 1, self.info[1], c_time, 'real+3'])
                 # 报警
                 msg = '采集实时数据超时，发生了阻塞'
-                self.Warning(msg)
+                Warning(self.info, msg)
                 self.Close()
-
                 break
             except:
+                c_time = int(time.time())
+                bq.put([0, 1, self.info[1], c_time, 'real+6'])
                 s = traceback.format_exc()
                 logging.error(s)
                 # 报警
-                msg = '出现异常,变量tem_real:'+tem_real.decode()
-                self.Warning(msg)
+                msg = '出现异常,变量tem_real:' + tem_real.decode()
+                Warning(self.info, msg)
                 self.Close()
-
                 break
 
-    # 输出报警信息并关闭套接字
-    def Warning(self, msg):
-        message = self.info[0] + self.info[1] + self.info[2] + self.info[3] + self.info[7] + msg
-        logging.warning(message)
-
-    # 实时采集数据（一个）
-    def RealTimeOneData(self):
-        print("开始测试仪器实时数据")
-        order = "get /21+{0}+dat+0 /http/1.1".format(self.info[1])
-        self.conInstrument.sendall(bytes(order, encoding="utf-8"))
-        try:
-            tem_real = self.conInstrument.recv(300)
-            if b'ack\n' in tem_real:
-                self.o_realdata = 0
-                self.StopData()
-                return tem_real.decode()
-
-                # 停止实时数据
-                #self.StopData()
-            elif tem_real == b'$nak\n':
-                self.o_realdata = 1
-                print(tem_real)
-            elif tem_real == b'$err\n':
-                self.o_realdata = 2
-                print(tem_real)
-            else:
-                self.o_realdata = 4
-                print(tem_real)
-        except socket.timeout:
-            self.o_realdata = 3
 
     # 采集5分钟数据
     def FiveData(self):
@@ -447,6 +402,55 @@ class DataCollection:
                 self.o_todaydata = 3
                 break
 
+    # 发送数据
+    def send(self, order):
+        self.conInstrument.sendall(order)
+
+    # 收取数据
+    def recv(self):
+        try:
+            tem_status = self.conInstrument.recv(100)
+            #print(tem_status)
+            if b'ack\n' in tem_status:
+                self.o_yqstatus = 0
+                return tem_status.decode()
+            elif tem_status == b'$nak\n':
+                self.o_yqstatus = 1
+                return None
+            elif tem_status == b'$err\n':
+                self.o_yqstatus = 2
+                return None
+            else:
+                self.o_yqstatus = 4
+                return None
+        except socket.timeout:
+            self.o_yqstatus = 3
+            return None
+        except:
+            self.o_yqstatus = 3
+            return None
+def order(stagescode, info):
+    if stagescode == 'con':
+        return bytes("get /19+{0}+ste /http/1.1".format(info[1]), encoding="utf-8")   #状态
+    elif stagescode == 'login':
+        return bytes("get /{0}+{1}+lin+{2}+{3} /http/1.1".\
+                     format(str(21 + len(info[4]) + len(info[5])), info[1], info[4], info[5]), encoding="utf-8")#login
+    elif stagescode == 'real':
+        return bytes("get /21+{0}+dat+0 /http/1.1".format(info[1]), encoding="utf-8")#实时
+    elif stagescode == 'five':
+        return bytes("get /21+{0}+dat+5 /http/1.1".format(info[1]), encoding="utf-8")#五分钟
+    elif stagescode == 'param':
+        return bytes("get /21+{0}+pmr+m /http/1.1".format(info[1]), encoding="utf-8") #参数
+    elif stagescode == 'stop':
+        return bytes("get /19+{0}+stp /http/1.1".format(info[1]), encoding="utf-8")#stop实时
+    elif stagescode == 'today':
+        return bytes("get /23+{0}+dat+1+0 /http/1.1".format(info[1]), encoding="utf-8")#当天
+
+
+# 输出报警信息并关闭套接字
+def Warning(info, msg):
+    message = info[0] + info[1] + info[2] + info[3] + info[7] + msg
+    logging.warning(message)
 
 # 五分钟数据导入到实时数据字典中
 def realdataImport(id, data):

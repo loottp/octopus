@@ -1,6 +1,6 @@
 # 主函数
 
-from collectData import *
+from collectData1 import *
 
 def Main():
     conn = sqlite3.connect('../web_oct/yq.db')
